@@ -6,7 +6,7 @@ import cors from "cors";
 
 const app = express();
 
-// --- PORT (Render provides PORT env var) ---
+// --- PORT (Render sets PORT env var) ---
 const PORT = process.env.PORT || 4000;
 
 // --- Paths ---
@@ -22,9 +22,9 @@ if (!fs.existsSync(annotsFile)) {
 }
 
 // --- Middleware ---
-app.use(cors());               // Allow frontend to call backend
-app.use(express.json());       // Parse JSON bodies
-app.use("/slides", express.static(slidesDir)); // Serve slide images
+app.use(cors());                      // Allow frontend to call backend
+app.use(express.json());              // Parse JSON bodies
+app.use("/slides", express.static(slidesDir)); // Serve static slide images
 
 // ==================== Annotations API ====================
 
@@ -58,7 +58,9 @@ app.get("/api/slides", (req, res) => {
     const files = fs
       .readdirSync(slidesDir)
       .filter(f => /\.(png|jpg|jpeg)$/i.test(f));
-    res.json(files.map(f => `/slides/${f}`));
+
+    // ✅ Return filenames only, not prefixed with /slides/
+    res.json(files);
   } catch (err) {
     console.error("Error listing slides:", err);
     res.status(500).json({ error: "Failed to list slides" });
@@ -72,7 +74,8 @@ app.post("/api/slides", upload.single("slide"), (req, res) => {
     const tempPath = req.file.path;
     const targetPath = path.join(slidesDir, req.file.originalname);
     fs.renameSync(tempPath, targetPath);
-    res.json({ status: "uploaded", file: `/slides/${req.file.originalname}` });
+
+    res.json({ status: "uploaded", file: req.file.originalname });
   } catch (err) {
     console.error("Error uploading slide:", err);
     res.status(500).json({ error: "Failed to upload slide" });
