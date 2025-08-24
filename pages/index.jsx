@@ -94,11 +94,13 @@ function SlidesCard() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const svgRef = useRef();
 
+  // --- Fetch slides + annotations ---
   useEffect(() => {
-    axios.get("http://localhost:4000/api/slides").then(res => setSlides(res.data));
-    axios.get("http://localhost:4000/api/annotations").then(res => setAnnotations(res.data.slides || {}));
+    axios.get("/api/slides").then(res => setSlides(res.data));
+    axios.get("/api/annotations").then(res => setAnnotations(res.data.slides || {}));
   }, []);
 
+  // --- Auto-play slideshow ---
   useEffect(() => {
     if (isPlaying && slides.length > 0) {
       const interval = setInterval(() => {
@@ -108,14 +110,16 @@ function SlidesCard() {
     }
   }, [isPlaying, slides.length]);
 
+  // --- Save annotations ---
   const saveAnnotations = (updated) => {
     setAnnotations(updated);
-    axios.post("http://localhost:4000/api/annotations", { slides: updated });
+    axios.post("/api/annotations", { slides: updated });
   };
 
   const prevSlide = () => setCurrentSlide(s => (s - 1 + slides.length) % slides.length);
   const nextSlide = () => setCurrentSlide(s => (s + 1) % slides.length);
 
+  // --- Add annotations ---
   const handleClick = (e) => {
     if (!tool || slides.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
@@ -125,8 +129,10 @@ function SlidesCard() {
     const slideKey = file.split("/").pop();
     const annots = { ...annotations };
     if (!annots[slideKey]) annots[slideKey] = [];
-    if (tool === "x") annots[slideKey].push({ type: "x", x, y });
-    else if (tool === "text") {
+
+    if (tool === "x") {
+      annots[slideKey].push({ type: "x", x, y });
+    } else if (tool === "text") {
       const text = prompt("Enter note:");
       if (text) annots[slideKey].push({ type: "text", x, y, text });
     }
@@ -151,13 +157,14 @@ function SlidesCard() {
     const slideKey = file.split("/").pop();
     const annots = { ...annotations };
     if (!annots[slideKey]) annots[slideKey] = [];
+
     if (tool === "box") {
       annots[slideKey].push({
         type: "box",
         x: Math.min(x1, x2),
         y: Math.min(y1, y2),
         w: Math.abs(x2 - x1),
-        h: Math.abs(y2 - y1)
+        h: Math.abs(y2 - y1),
       });
     } else if (tool === "arrow") {
       annots[slideKey].push({ type: "arrow", x1, y1, x2, y2 });
@@ -185,10 +192,11 @@ function SlidesCard() {
   const file = slides[currentSlide];
   const slideKey = file.split("/").pop();
 
+  // --- Slide viewer with SVG overlay ---
   const viewer = (
     <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-full">
       <img
-        src={`http://localhost:4000${file}`}
+        src={file}
         alt="Slide"
         className="object-contain max-h-full max-w-full"
       />
@@ -220,7 +228,8 @@ function SlidesCard() {
                 y={a.y}
                 width={a.w}
                 height={a.h}
-                className="stroke-red-600 fill-transparent"
+                stroke="red"
+                fill="transparent"
               />
             );
           if (a.type === "x")
@@ -261,177 +270,52 @@ function SlidesCard() {
 
   return (
     <>
-      {/* Card View */}
-      {/* Card View */}
-{!isFullscreen && (
-  <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
-    <h2 className="text-lg font-bold underline mb-2 flex justify-between items-center">
-      Airfield Slides
-      <button
-        onClick={() => setIsFullscreen(true)}
-        className="px-2 py-1 bg-slate-700 rounded text-sm"
-      >
-        🔎 Expand
-      </button>
-    </h2>
+      {/* --- Card View --- */}
+      {!isFullscreen && (
+        <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
+          <h2 className="text-lg font-bold underline mb-2 flex justify-between items-center">
+            Airfield Slides
+            <button
+              onClick={() => setIsFullscreen(true)}
+              className="px-2 py-1 bg-slate-700 rounded text-sm"
+            >
+              🔎 Expand
+            </button>
+          </h2>
 
-    {/* Slide viewer fills card */}
-    <div className="relative bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[500px]">
-      <img
-        src={`http://localhost:4000${file}`}
-        alt="Slide"
-        className="absolute inset-0 w-full h-full object-contain"
-      />
-      <svg
-        ref={svgRef}
-        className="absolute inset-0 w-full h-full"
-        onClick={handleClick}
-        onMouseDown={handleDragStart}
-        onMouseUp={handleDragEnd}
-      >
-        <defs>
-          <marker
-            id="arrowhead"
-            markerWidth="10"
-            markerHeight="7"
-            refX="10"
-            refY="3.5"
-            orient="auto"
-          >
-            <polygon points="0 0, 10 3.5, 0 7" fill="green" />
-          </marker>
-        </defs>
-        {annotations[slideKey]?.map((a, i) => {
-          if (a.type === "box")
-            return (
-              <rect
-                key={i}
-                x={a.x}
-                y={a.y}
-                width={a.w}
-                height={a.h}
-                className="stroke-red-600 fill-transparent"
-              />
-            );
-          if (a.type === "x")
-            return (
-              <text
-                key={i}
-                x={a.x}
-                y={a.y}
-                fontSize="32"
-                fill="red"
-                fontWeight="bold"
-              >
-                X
-              </text>
-            );
-          if (a.type === "arrow")
-            return (
-              <line
-                key={i}
-                x1={a.x1}
-                y1={a.y1}
-                x2={a.x2}
-                y2={a.y2}
-                stroke="green"
-                strokeWidth="4"
-                markerEnd="url(#arrowhead)"
-              />
-            );
-          if (a.type === "text")
-            return (
-              <foreignObject key={i} x={a.x} y={a.y} width="200" height="50">
-                <div
-                  className="px-1 text-sm font-bold text-white bg-black border border-red-600 rounded"
-                  style={{
-                    display: "inline-block",
-                    maxWidth: "180px",
-                    wordWrap: "break-word",
-                  }}
-                >
-                  {a.text}
-                </div>
-              </foreignObject>
-            );
-          return null;
-        })}
-      </svg>
-    </div>
+          {/* Slide viewer fills card */}
+          <div className="relative bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[500px]">
+            {viewer}
+          </div>
 
-    {/* Controls (allowed to flow outside card) */}
-    <div className="flex justify-center gap-2 mb-2 mt-2">
-      <button onClick={prevSlide} className="px-3 py-1 bg-slate-700 rounded">
-        ⬅️
-      </button>
-      {isPlaying ? (
-        <button
-          onClick={() => setIsPlaying(false)}
-          className="px-3 py-1 bg-red-600 rounded"
-        >
-          ⏹️ Stop
-        </button>
-      ) : (
-        <button
-          onClick={() => setIsPlaying(true)}
-          className="px-3 py-1 bg-green-600 rounded"
-        >
-          ▶️ Play
-        </button>
+          {/* Controls */}
+          <div className="flex justify-center gap-2 mb-2 mt-2">
+            <button onClick={prevSlide} className="px-3 py-1 bg-slate-700 rounded">⬅️</button>
+            {isPlaying ? (
+              <button onClick={() => setIsPlaying(false)} className="px-3 py-1 bg-red-600 rounded">⏹️ Stop</button>
+            ) : (
+              <button onClick={() => setIsPlaying(true)} className="px-3 py-1 bg-green-600 rounded">▶️ Play</button>
+            )}
+            <button onClick={nextSlide} className="px-3 py-1 bg-slate-700 rounded">➡️</button>
+          </div>
+
+          {/* Annotation Toolbar */}
+          <div className="flex justify-center gap-2 mt-2">
+            <button onClick={() => setTool("box")}   className={tool==="box" ? "bg-blue-600" : "bg-slate-700"}>🟥 Box</button>
+            <button onClick={() => setTool("x")}     className={tool==="x" ? "bg-blue-600" : "bg-slate-700"}>❌ X</button>
+            <button onClick={() => setTool("arrow")} className={tool==="arrow" ? "bg-blue-600" : "bg-slate-700"}>➡ Arrow</button>
+            <button onClick={() => setTool("text")}  className={tool==="text" ? "bg-blue-600" : "bg-slate-700"}>📝 Text</button>
+            <button onClick={clearAnnotations} className="bg-red-600 px-2 py-1 rounded">🗑 Clear</button>
+          </div>
+        </section>
       )}
-      <button onClick={nextSlide} className="px-3 py-1 bg-slate-700 rounded">
-        ➡️
-      </button>
-    </div>
 
-    {/* Annotation Toolbar */}
-    <div className="flex justify-center gap-2 mt-2">
-      <button
-        onClick={() => setTool("box")}
-        className={tool === "box" ? "bg-blue-600" : "bg-slate-700"}
-      >
-        🟥 Box
-      </button>
-      <button
-        onClick={() => setTool("x")}
-        className={tool === "x" ? "bg-blue-600" : "bg-slate-700"}
-      >
-        ❌ X
-      </button>
-      <button
-        onClick={() => setTool("arrow")}
-        className={tool === "arrow" ? "bg-blue-600" : "bg-slate-700"}
-      >
-        ➡ Arrow
-      </button>
-      <button
-        onClick={() => setTool("text")}
-        className={tool === "text" ? "bg-blue-600" : "bg-slate-700"}
-      >
-        📝 Text
-      </button>
-      <button
-        onClick={clearAnnotations}
-        className="bg-red-600 px-2 py-1 rounded"
-      >
-        🗑 Clear
-      </button>
-    </div>
-  </section>
-)}
-
-
-      {/* Fullscreen View */}
+      {/* --- Fullscreen View --- */}
       {isFullscreen && (
         <div className="fixed inset-0 z-50 bg-black bg-opacity-95 flex flex-col">
           <div className="flex justify-between items-center p-3 text-white">
             <h2 className="text-lg font-bold">Airfield Slides</h2>
-            <button
-              onClick={() => setIsFullscreen(false)}
-              className="px-2 py-1 bg-red-600 rounded"
-            >
-              ❌ Close
-            </button>
+            <button onClick={() => setIsFullscreen(false)} className="px-2 py-1 bg-red-600 rounded">❌ Close</button>
           </div>
 
           {/* Viewer */}
@@ -448,7 +332,7 @@ function SlidesCard() {
             <button onClick={nextSlide} className="px-3 py-1 bg-slate-700 rounded">➡️</button>
           </div>
 
-          {/* Annotation Toolbar */}
+          {/* Toolbar */}
           <div className="flex justify-center gap-2 mt-2 mb-4">
             <button onClick={() => setTool("box")}   className={tool==="box" ? "bg-blue-600" : "bg-slate-700"}>🟥 Box</button>
             <button onClick={() => setTool("x")}     className={tool==="x" ? "bg-blue-600" : "bg-slate-700"}>❌ X</button>
