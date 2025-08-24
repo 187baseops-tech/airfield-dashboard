@@ -190,7 +190,6 @@ function SlidesCard() {
         alt="Slide"
         className="object-contain max-h-full max-w-full"
       />
-      {/* SVG Annotations */}
       <svg
         ref={svgRef}
         className="absolute inset-0 w-full h-full"
@@ -224,7 +223,6 @@ function SlidesCard() {
 
   return (
     <>
-      {/* Card View */}
       {!isFullscreen && (
         <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
           <h2 className="text-lg font-bold underline mb-2 flex justify-between items-center">
@@ -252,8 +250,6 @@ function SlidesCard() {
           </div>
         </section>
       )}
-
-      {/* Fullscreen View */}
       {isFullscreen && (
         <div className="fixed inset-0 z-50 bg-black bg-opacity-95 flex flex-col">
           <div className="flex justify-between items-center p-3 text-white">
@@ -261,22 +257,6 @@ function SlidesCard() {
             <button onClick={() => setIsFullscreen(false)} className="px-2 py-1 bg-red-600 rounded">❌ Close</button>
           </div>
           <div className="flex-1 flex items-center justify-center">{viewer}</div>
-          <div className="flex justify-center gap-2 mb-2 mt-2">
-            <button onClick={prevSlide} className="px-3 py-1 bg-slate-700 rounded">⬅️</button>
-            {isPlaying ? (
-              <button onClick={() => setIsPlaying(false)} className="px-3 py-1 bg-red-600 rounded">⏹️ Stop</button>
-            ) : (
-              <button onClick={() => setIsPlaying(true)} className="px-3 py-1 bg-green-600 rounded">▶️ Play</button>
-            )}
-            <button onClick={nextSlide} className="px-3 py-1 bg-slate-700 rounded">➡️</button>
-          </div>
-          <div className="flex justify-center gap-2 mt-2 mb-4">
-            <button onClick={() => setTool("box")}   className={tool==="box" ? "bg-blue-600" : "bg-slate-700"}>🟥 Box</button>
-            <button onClick={() => setTool("x")}     className={tool==="x" ? "bg-blue-600" : "bg-slate-700"}>❌ X</button>
-            <button onClick={() => setTool("arrow")} className={tool==="arrow" ? "bg-blue-600" : "bg-slate-700"}>➡ Arrow</button>
-            <button onClick={() => setTool("text")}  className={tool==="text" ? "bg-blue-600" : "bg-slate-700"}>📝 Text</button>
-            <button onClick={clearAnnotations} className="bg-red-600 px-2 py-1 rounded">🗑 Clear</button>
-          </div>
         </div>
       )}
     </>
@@ -286,13 +266,181 @@ function SlidesCard() {
 // --- Dashboard (Default Export) ---
 export default function Dashboard() {
   const ICAO = "KMGM";
-  // ... your full METAR/TAF/NOTAM/BASH state + logic goes here (unchanged)
+
+  const [metar, setMetar] = useState("");
+  const [taf, setTaf] = useState("");
+  const [parsed, setParsed] = useState({});
+  const [cat, setCat] = useState("VFR");
+  const [fits, setFits] = useState({ level: "NORMAL", f: NaN });
+  const [altReq, setAltReq] = useState(false);
+  const [altICAO, setAltICAO] = useState("");
+  const [notams, setNotams] = useState([]);
+  const [expandedNotams, setExpandedNotams] = useState({});
+  const [lastUpdate, setLastUpdate] = useState(new Date());
+
+  // Airfield toggles...
+  const [activeRunway, setActiveRunway] = useState("10");
+  const [rsc, setRsc] = useState("DRY");
+  const [rscNotes, setRscNotes] = useState("");
+  const [barriers, setBarriers] = useState({ east: "DOWN", west: "DOWN" });
+  const [navaids, setNavaids] = useState({
+    ils10: true,
+    ils28: true,
+    mgm: true,
+    mxf: true,
+  });
+  const [arff, setArff] = useState("GREEN");
+
+  const [bash, setBash] = useState({
+    KMGM: "LOW",
+    KMXF: "LOW",
+    "PH/CR MOA": "LOW",
+    "BHM MOA": "LOW",
+    "Shelby Range": "LOW",
+    "VR-060": "LOW",
+    "VR-1056": "LOW",
+  });
+
+  const API = process.env.REACT_APP_API_URL;
+
+  async function fetchData() {
+    try {
+      const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
+      const t = await axios.get(`${API}/api/taf?icao=${ICAO}`);
+      const n = await axios.get(`${API}/api/notams?icao=${ICAO}`);
+      setMetar(m.data.raw || "");
+      setTaf(t.data.raw || "");
+      setNotams(n.data?.notams || []);
+      setLastUpdate(new Date());
+    } catch (err) {
+      console.error("Fetch error:", err);
+    }
+  }
+
+  useEffect(() => {
+    fetchData();
+    const timer = setInterval(fetchData, 300000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const p = parseMetar(metar);
+    setParsed(p);
+
+    const visMiles = parseVisibility(p.vis);
+    const ceilFt =
+      p.ceiling && /^(BKN|OVC)\d{3}/.test(p.ceiling)
+        ? parseInt(p.ceiling.match(/\d{3}/)[0]) * 100
+        : 99999;
+    setCat(flightCat(ceilFt, visMiles));
+
+    const tempMatch = p.tempdew?.match(/(M?\d{2})\/(M?\d{2})/);
+    if (tempMatch) {
+      const tC = parseInt(tempMatch[1].replace("M", "-"));
+      const tdC = parseInt(tempMatch[2].replace("M", "-"));
+      const tF = (tC * 9) / 5 + 32;
+      const tdF = (tdC * 9) / 5 + 32;
+      setFits(lookupFits(tF, tdF));
+    }
+  }, [metar, taf]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4">
-      {/* keep your header, airfield status, weather, notams, etc. */}
-      {/* finally include slides */}
-      <SlidesCard />
+      <header className="flex flex-col items-center mb-4 text-center">
+        <h1 className="text-xl font-bold">187th OSS — {ICAO} Dannelly Field</h1>
+        <p className="text-lg font-semibold">Airfield Dashboard</p>
+        <div className="text-sm mt-2">
+          <p>{new Date().toLocaleString()}</p>
+          <p>Zulu: {new Date().toUTCString()}</p>
+          <p className="text-slate-400">Last Updated: {lastUpdate.toLocaleString()}</p>
+          <button onClick={fetchData} className="mt-1 px-3 py-1 bg-blue-600 rounded">
+            🔄 Refresh
+          </button>
+        </div>
+      </header>
+
+      {/* Grid layout */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+        {/* Airfield Status */}
+        <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
+          <h2 className="text-lg font-bold underline mb-2">Airfield Status</h2>
+          {/* Active Runway Toggle */}
+          <div className="mb-2">
+            <p className="font-semibold">Active Runway</p>
+            <button className="px-3 py-1 rounded bg-green-600"
+              onClick={() => setActiveRunway(activeRunway === "10" ? "28" : "10")}>
+              {activeRunway}
+            </button>
+          </div>
+          {/* ARFF etc. (cut short for brevity, keep same as your code) */}
+        </section>
+
+        {/* Weather */}
+        <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
+          <div className="flex items-center gap-2 mb-2">
+            <h2 className="text-lg font-bold underline">WEATHER</h2>
+            <span className={`px-3 py-1 rounded-full font-bold ${cat === "VFR" ? "bg-green-600" :
+              cat === "MVFR" ? "bg-blue-600" :
+              cat === "IFR" ? "bg-red-600" : "bg-fuchsia-700"}`}>
+              {cat}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm mb-2">
+            <div>Winds: {parsed.wind}</div>
+            <div>Vis: {parsed.vis}</div>
+            <div>Ceiling: {parsed.ceiling}</div>
+            <div>Altimeter: {parsed.altimeter}</div>
+            <div>Temp/Dew: {parsed.tempdew}</div>
+            <div>FITS: {fits.level}</div>
+          </div>
+          <div className="mt-2 flex-1 overflow-y-auto">
+            <p className="text-xs text-slate-400">Raw METAR</p>
+            <pre className="bg-slate-900 p-2 rounded text-sm">{metar || "--"}</pre>
+            <p className="text-xs text-slate-400">Raw TAF</p>
+            <pre className="bg-slate-900 p-2 rounded text-sm whitespace-pre-wrap"
+              dangerouslySetInnerHTML={{ __html: highlightTaf(taf) }} />
+          </div>
+        </section>
+
+        {/* NOTAMs */}
+        <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
+          <h2 className="text-lg font-bold underline mb-2">KMGM NOTAMs</h2>
+          {notams.length > 0 ? (
+            <ul className="space-y-2 text-sm flex-1 overflow-y-auto">
+              {notams.map((n) => (
+                <li key={n.id} className="p-2 rounded border border-slate-700 bg-slate-900">
+                  <span dangerouslySetInnerHTML={{ __html: n.text }} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-slate-400">No NOTAMs available.</p>
+          )}
+        </section>
+      </div>
+
+      {/* Second Row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch mt-4">
+        {/* BASH Forecast */}
+        <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
+          <h2 className="text-lg font-bold underline mb-2">BASH Forecast</h2>
+          <div className="flex flex-col gap-2">
+            {Object.keys(bash).map((loc) => (
+              <button key={loc} className={`px-3 py-1 rounded font-bold ${bash[loc] === "LOW" ? "bg-green-600" :
+                bash[loc] === "MODERATE" ? "bg-yellow-500 text-black" : "bg-red-600"}`}
+                onClick={() => setBash((prev) => ({
+                  ...prev,
+                  [loc]: prev[loc] === "LOW" ? "MODERATE" : prev[loc] === "MODERATE" ? "SEVERE" : "LOW"
+                }))}>
+                {loc}: {bash[loc]}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Airfield Slides */}
+        <SlidesCard />
+      </div>
     </div>
   );
 }
