@@ -85,6 +85,9 @@ function lookupFits(tempF, dewF) {
 }
 
 // --- SlidesCard ---
+import { useState, useEffect, useRef } from "react";
+import axios from "axios";
+
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -94,11 +97,14 @@ function SlidesCard() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const svgRef = useRef();
 
+  // Backend API base URL (set via Render env var or local .env)
+  const API = process.env.REACT_APP_API_URL;
+
   // --- Fetch slides + annotations ---
   useEffect(() => {
-    axios.get("/api/slides").then(res => setSlides(res.data));
-    axios.get("/api/annotations").then(res => setAnnotations(res.data.slides || {}));
-  }, []);
+    axios.get(`${API}/api/slides`).then(res => setSlides(res.data));
+    axios.get(`${API}/api/annotations`).then(res => setAnnotations(res.data.slides || {}));
+  }, [API]);
 
   // --- Auto-play slideshow ---
   useEffect(() => {
@@ -113,20 +119,20 @@ function SlidesCard() {
   // --- Save annotations ---
   const saveAnnotations = (updated) => {
     setAnnotations(updated);
-    axios.post("/api/annotations", { slides: updated });
+    axios.post(`${API}/api/annotations`, { slides: updated });
   };
 
   const prevSlide = () => setCurrentSlide(s => (s - 1 + slides.length) % slides.length);
   const nextSlide = () => setCurrentSlide(s => (s + 1) % slides.length);
 
-  // --- Add annotations ---
+  // --- Annotation handlers ---
   const handleClick = (e) => {
     if (!tool || slides.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const file = slides[currentSlide];
-    const slideKey = file.split("/").pop();
+    const slideKey = file; // key is just filename now
     const annots = { ...annotations };
     if (!annots[slideKey]) annots[slideKey] = [];
 
@@ -154,7 +160,7 @@ function SlidesCard() {
     const x1 = parseFloat(svgRef.current.dataset.startX);
     const y1 = parseFloat(svgRef.current.dataset.startY);
     const file = slides[currentSlide];
-    const slideKey = file.split("/").pop();
+    const slideKey = file;
     const annots = { ...annotations };
     if (!annots[slideKey]) annots[slideKey] = [];
 
@@ -175,7 +181,7 @@ function SlidesCard() {
   const clearAnnotations = () => {
     if (slides.length === 0) return;
     const file = slides[currentSlide];
-    const slideKey = file.split("/").pop();
+    const slideKey = file;
     const annots = { ...annotations, [slideKey]: [] };
     saveAnnotations(annots);
   };
@@ -190,13 +196,13 @@ function SlidesCard() {
   }
 
   const file = slides[currentSlide];
-  const slideKey = file.split("/").pop();
+  const slideKey = file;
 
   // --- Slide viewer with SVG overlay ---
   const viewer = (
     <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-full">
       <img
-        src={file}
+        src={`${API}/slides/${file}`}  // build full path with backend API
         alt="Slide"
         className="object-contain max-h-full max-w-full"
       />
@@ -283,7 +289,6 @@ function SlidesCard() {
             </button>
           </h2>
 
-          {/* Slide viewer fills card */}
           <div className="relative bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[500px]">
             {viewer}
           </div>
@@ -299,7 +304,7 @@ function SlidesCard() {
             <button onClick={nextSlide} className="px-3 py-1 bg-slate-700 rounded">➡️</button>
           </div>
 
-          {/* Annotation Toolbar */}
+          {/* Toolbar */}
           <div className="flex justify-center gap-2 mt-2">
             <button onClick={() => setTool("box")}   className={tool==="box" ? "bg-blue-600" : "bg-slate-700"}>🟥 Box</button>
             <button onClick={() => setTool("x")}     className={tool==="x" ? "bg-blue-600" : "bg-slate-700"}>❌ X</button>
@@ -318,10 +323,8 @@ function SlidesCard() {
             <button onClick={() => setIsFullscreen(false)} className="px-2 py-1 bg-red-600 rounded">❌ Close</button>
           </div>
 
-          {/* Viewer */}
           <div className="flex-1 flex items-center justify-center">{viewer}</div>
 
-          {/* Controls */}
           <div className="flex justify-center gap-2 mb-2 mt-2">
             <button onClick={prevSlide} className="px-3 py-1 bg-slate-700 rounded">⬅️</button>
             {isPlaying ? (
@@ -332,7 +335,6 @@ function SlidesCard() {
             <button onClick={nextSlide} className="px-3 py-1 bg-slate-700 rounded">➡️</button>
           </div>
 
-          {/* Toolbar */}
           <div className="flex justify-center gap-2 mt-2 mb-4">
             <button onClick={() => setTool("box")}   className={tool==="box" ? "bg-blue-600" : "bg-slate-700"}>🟥 Box</button>
             <button onClick={() => setTool("x")}     className={tool==="x" ? "bg-blue-600" : "bg-slate-700"}>❌ X</button>
@@ -345,6 +347,8 @@ function SlidesCard() {
     </>
   );
 }
+
+export default SlidesCard;
 
 // --- Main Dashboard ---
 export default function Dashboard() {
