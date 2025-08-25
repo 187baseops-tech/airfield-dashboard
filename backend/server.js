@@ -3,6 +3,7 @@ import cors from "cors";
 import axios from "axios";
 import solclientjs from "solclientjs";
 import { parseStringPromise } from "xml2js";
+import https from "https";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -32,14 +33,17 @@ solclientjs.SolclientFactory.init({
 });
 
 // ---------------------------------------
-// Scraper: Fetch baseline NOTAMs from OurAirports (HTTP)
+// Scraper: Fetch baseline NOTAMs from OurAirports (HTTPS, ignore bad certs)
 // ---------------------------------------
 async function fetchBaselineNotams() {
   try {
     console.log("🌐 Scraping baseline NOTAMs for KMGM from OurAirports...");
-    const url = "http://ourairports.com/airports/KMGM/notams.html"; // use HTTP
+
+    const agent = new https.Agent({ rejectUnauthorized: false });
+    const url = "https://ourairports.com/airports/KMGM/notams.html";
 
     const res = await axios.get(url, {
+      httpsAgent: agent,
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; AirfieldDashboard/1.0)",
       },
