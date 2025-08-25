@@ -46,7 +46,11 @@ function saveState() {
 
 // ---- Slides / Annotations ----
 const SLIDES_DIR = path.join(process.cwd(), "data/slides");
-const ANNOT_FILE = "./annotations.json";
+const ANNOT_FILE = "./data/annotations.json";
+
+// Log at startup so we know what path is being used
+console.log("⚙️ process.cwd():", process.cwd());
+console.log("⚙️ SLIDES_DIR is set to:", SLIDES_DIR);
 
 // ---- NOTAM Scraper ----
 async function fetchNotams(icao = "KMGM") {
@@ -118,18 +122,29 @@ app.get("/api/bash", (req, res) => res.json(savedState.bash));
 
 // Slides + Annotations
 app.use("/slides", express.static(SLIDES_DIR));
+
 app.get("/api/slides", (req, res) => {
   try {
-    if (!fs.existsSync(SLIDES_DIR)) return res.json([]);
-    const files = fs
-      .readdirSync(SLIDES_DIR)
-      .filter((f) => /\.(png|jpg|jpeg)$/i.test(f));
-    res.json(files);
+    console.log("📂 Checking slide directory:", SLIDES_DIR);
+
+    if (!fs.existsSync(SLIDES_DIR)) {
+      console.log("❌ Slides directory not found");
+      return res.json([]);
+    }
+
+    const files = fs.readdirSync(SLIDES_DIR);
+    console.log("📂 Files found in slides dir:", files);
+
+    const images = files.filter((f) => /\.(png|jpg|jpeg)$/i.test(f));
+    console.log("🖼️ Returning images:", images);
+
+    res.json(images);
   } catch (err) {
     console.error("❌ Failed to read slides:", err.message);
     res.json([]);
   }
 });
+
 app.get("/api/annotations", (req, res) => {
   if (fs.existsSync(ANNOT_FILE)) {
     try {
@@ -142,6 +157,7 @@ app.get("/api/annotations", (req, res) => {
     res.json({ slides: {} });
   }
 });
+
 app.post("/api/annotations", (req, res) => {
   try {
     fs.writeFileSync(ANNOT_FILE, JSON.stringify(req.body, null, 2));
