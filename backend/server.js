@@ -34,7 +34,7 @@ solclientjs.SolclientFactory.init({
 });
 
 // ---------------------------------------
-// Scraper: Fetch baseline NOTAMs from OurAirports (cheerio parsing)
+// Scraper: Fetch baseline NOTAMs from OurAirports (cheerio + regex fallback)
 // ---------------------------------------
 async function fetchBaselineNotams() {
   try {
@@ -53,31 +53,44 @@ async function fetchBaselineNotams() {
     const html = res.data;
     const $ = cheerio.load(html);
 
-    const notamDivs = $("div.notam");
+    // Match any div with "notam" in its class name
+    let notamDivs = $("div[class*='notam'], div[class*='NOTAM']");
+
     if (notamDivs.length === 0) {
-      console.log("⚠️ OurAirports returned no KMGM NOTAMs (maybe clear airfield)");
-      return;
+      console.warn("⚠️ Cheerio found no <div class='notam'> elements. Falling back to regex...");
+
+      // fallback: find plain text "NOTAM" lines
+      const fallbackMatches = html.match(/NOTAM[\s\S]*?(?=<\/div>|<\/p>)/gi) || [];
+
+      fallbackMatches.forEach((block, idx) => {
+        const rawNotam = block.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        if (rawNotam.length > 0) {
+          activeNotams.push({
+            id: `BASE-${Date.now()}-${idx}`,
+            icao: "KMGM",
+            text: rawNotam,
+            startTime: new Date().toISOString(),
+            endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          });
+        }
+      });
+
+      console.log(`✅ Loaded ${fallbackMatches.length} baseline KMGM NOTAMs from fallback regex`);
+    } else {
+      notamDivs.each((idx, el) => {
+        const rawNotam = $(el).text().replace(/\s+/g, " ").trim();
+        if (rawNotam.length > 0) {
+          activeNotams.push({
+            id: `BASE-${Date.now()}-${idx}`,
+            icao: "KMGM",
+            text: rawNotam,
+            startTime: new Date().toISOString(),
+            endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          });
+        }
+      });
+      console.log(`✅ Loaded ${notamDivs.length} baseline KMGM NOTAMs from OurAirports`);
     }
-
-    notamDivs.each((idx, el) => {
-      const rawNotam = $(el)
-        .find("p")
-        .map((i, p) => $(p).text().trim())
-        .get()
-        .join(" ");
-
-      if (rawNotam.length > 0) {
-        activeNotams.push({
-          id: `BASE-${Date.now()}-${idx}`,
-          icao: "KMGM",
-          text: rawNotam,
-          startTime: new Date().toISOString(),
-          endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-        });
-      }
-    });
-
-    console.log(`✅ Loaded ${activeNotams.length} baseline KMGM NOTAMs from OurAirports`);
   } catch (err) {
     console.error("❌ OurAirports scraper failed:", err.message);
   }
