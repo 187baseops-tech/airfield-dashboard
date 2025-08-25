@@ -48,11 +48,11 @@ function connectToSwim() {
   session.on(solclientjs.SessionEventCode.UP_NOTICE, () => {
     console.log("✅ Connected to FAA SWIM NOTAM feed");
 
-    // ✅ FIX: no FlowProperties constructor
+    // ✅ FIX: proper consumer props + enum usage
     const consumer = session.createMessageConsumer({
       flowStartState: true,
       transportWindowSize: 10,
-      ackMode: solclientjs.MessageConsumerAckMode.CLIENT,
+      ackMode: solclientjs.MessageConsumerAcknowledgementMode.CLIENT,
       queueDescriptor: {
         type: solclientjs.QueueType.QUEUE,
         name: SWIM_QUEUE,
