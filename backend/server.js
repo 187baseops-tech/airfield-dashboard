@@ -83,13 +83,23 @@ app.get("/api/notams", async (req, res) => {
   try {
     const { icao } = req.query;
     const url = `https://notams.aim.faa.gov/notamSearch/search?designators=${icao}&format=json`;
-    const { data } = await axios.get(url);
+
+    const { data } = await axios.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115 Safari/537.36",
+        "Accept": "application/json,text/plain,*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      timeout: 10000, // avoid Render timing out
+    });
+
     res.json({ notams: data || [] });
   } catch (err) {
     console.error("NOTAM fetch error:", err.message);
     res.status(500).json({ error: "Failed to fetch NOTAMs" });
   }
 });
+
 
 // ---- Start Server ----
 app.listen(PORT, () => console.log(`✅ Backend running on port ${PORT}`));
