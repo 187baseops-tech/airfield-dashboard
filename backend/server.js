@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json());
 
-// ---- Persistence ----
+// ---- Persistent State ----
 const STATE_FILE = "./state.json";
 let savedState = {
   navaids: { mgm: "IN", mxf: "IN", ils10: "IN", ils28: "OUT" },
@@ -44,7 +44,7 @@ function saveState() {
   fs.writeFileSync(STATE_FILE, JSON.stringify(savedState, null, 2));
 }
 
-// ---- Paths ----
+// ---- Slides / Annotations ----
 const SLIDES_DIR = path.join(process.cwd(), "backend/data/slides");
 const ANNOT_FILE = "./annotations.json";
 
@@ -61,7 +61,6 @@ async function fetchNotams(icao = "KMGM") {
     const $ = cheerio.load(html);
     const notams = [];
 
-    // Try multiple selectors
     $("a[id^=notam-], div#notams a, div#notams li").each((_, el) => {
       const text = $(el).text().trim();
       if (!text) return;
@@ -113,11 +112,11 @@ app.post("/api/state", (req, res) => {
   res.json({ ok: true, state: savedState });
 });
 
-// Legacy helpers for frontend
+// NAVAIDs + BASH helpers
 app.get("/api/navaids", (req, res) => res.json(savedState.navaids));
 app.get("/api/bash", (req, res) => res.json(savedState.bash));
 
-// ---- Slides ----
+// Slides + Annotations
 app.use("/slides", express.static(SLIDES_DIR));
 app.get("/api/slides", (req, res) => {
   try {
