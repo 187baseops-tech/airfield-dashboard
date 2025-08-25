@@ -51,29 +51,32 @@ async function fetchBaselineNotams() {
 
     const html = res.data;
 
-    // Match <pre> or <div class="notam">
+    // Match NOTAM containers (<div class="notam">) or <pre> fallback
     const matches = [
-      ...html.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/gi),
       ...html.matchAll(/<div[^>]*class=["']notam["'][^>]*>([\s\S]*?)<\/div>/gi),
+      ...html.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/gi),
     ];
 
     if (matches.length > 0) {
       matches.forEach((m, idx) => {
+        // Remove any HTML tags inside the block
         const rawNotam = m[1]
           .replace(/<[^>]+>/g, "")
           .replace(/\s+/g, " ")
           .trim();
 
-        activeNotams.push({
-          id: `BASE-${Date.now()}-${idx}`,
-          icao: "KMGM",
-          text: rawNotam,
-          startTime: new Date().toISOString(),
-          endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-        });
+        if (rawNotam.length > 0) {
+          activeNotams.push({
+            id: `BASE-${Date.now()}-${idx}`,
+            icao: "KMGM",
+            text: rawNotam,
+            startTime: new Date().toISOString(),
+            endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          });
+        }
       });
 
-      console.log(`✅ Loaded ${matches.length} baseline KMGM NOTAMs from OurAirports`);
+      console.log(`✅ Loaded ${activeNotams.length} baseline KMGM NOTAMs from OurAirports`);
     } else {
       console.log("⚠️ OurAirports returned no KMGM NOTAMs (maybe clear airfield)");
     }
