@@ -2,20 +2,20 @@
 import express from "express";
 import axios from "axios";
 import * as cheerio from "cheerio";
+import cors from "cors";
 import https from "https";
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// --- In-memory store ---
-let notams = [];
+// ✅ Enable CORS so frontend can reach backend
+app.use(cors());
+app.use(express.json());
 
-// --- Helper: scrape NOTAMs from OurAirports ---
-async function scrapeNotams(icao) {
+// ---- NOTAM Scraper (OurAirports) ----
+async function fetchNotams(icao = "KMGM") {
   try {
     console.log(`🌐 Scraping NOTAMs for ${icao} from OurAirports...`);
-
-    // Per-request agent (ignore cert errors only for this request)
     const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
     const { data: html } = await axios.get(
@@ -24,72 +24,68 @@ async function scrapeNotams(icao) {
     );
 
     const $ = cheerio.load(html);
+    const notams = [];
 
-    const results = [];
-    // Look at all text nodes and catch any that start with NOTAM
-    $("body *").each((i, el) => {
+    $("a[id^=notam-]").each((_, el) => {
       const text = $(el).text().trim();
-      if (text.startsWith("NOTAM") && (text.includes("KMGM") || text.includes("!MGM"))) {
-        results.push({
-          id: `notam-${i}`,
-          text: cleanNotamText(text),
-        });
-      }
+      if (!text) return;
+
+      // Clean up text
+      const cleaned = text
+        .replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)")
+        .replace(/\s?NOTAMN/g, "")
+        .trim();
+
+      const match = cleaned.match(/(M?\d{3,4}\/\d{2}|\d{2}\/\d{3,4})/);
+      const id = match ? match[0] : cleaned.slice(0, 12);
+
+      notams.push({ id, text: cleaned });
     });
 
-    if (results.length === 0) {
-      console.warn(`⚠️ OurAirports returned no ${icao} NOTAMs (maybe clear airfield)`);
-    } else {
-      console.log(
-        "✅ Scraped NOTAMs sample:",
-        results.slice(0, 3).map((n) => n.text)
-      );
-    }
-
-    notams = results;
-    return results;
+    console.log("✅ Scraped NOTAMs sample:", notams.slice(0, 3));
+    return notams;
   } catch (err) {
-    console.error(`❌ OurAirports scraper failed: ${err.message}`);
+    console.error("❌ OurAirports scraper failed:", err.message);
     return [];
   }
 }
 
-// --- Clean up raw NOTAM text ---
-function cleanNotamText(raw) {
-  let cleaned = raw;
-
-  // Replace long airport name with just (KMGM)
-  cleaned = cleaned.replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)");
-
-  // Remove NOTAMN / NOTAMR keywords
-  cleaned = cleaned.replace(/\bNOTAM[N,R]\b/g, "").trim();
-
-  // Remove Q) section
-  cleaned = cleaned.replace(/Q\)[\s\S]*?(?=A\))/g, "");
-
-  // Keep A), B), C), E) but drop CREATED and SOURCE lines
-  cleaned = cleaned
-    .replace(/CREATED:.*$/gm, "")
-    .replace(/SOURCE:.*$/gm, "")
-    .trim();
-
-  return cleaned;
-}
-
-// --- Routes ---
-app.get("/api/notams", async (req, res) => {
-  const icao = (req.query.icao || "KMGM").toUpperCase();
-  const data = await scrapeNotams(icao);
-  res.json({ notams: data });
-});
-
-// Health check
+// ---- API Routes ----
 app.get("/", (req, res) => {
-  res.send("✅ Airfield Dashboard backend is running.");
+  res.send("✅ Airfield Dashboard Backend is running");
 });
 
-// --- Start server ---
+// NOTAMs
+app.get("/api/notams", async (req, res) => {
+  const icao = req.query.icao || "KMGM";
+  const notams = await fetchNotams(icao);
+  res.json({ notams });
+});
+
+// Weather stub
+app.get("/api/metar", (req, res) => {
+  const icao = req.query.icao || "KMGM";
+  res.json({ raw: `${icao} 251755Z AUTO 00000KT 10SM CLR 30/18 A2992 RMK AO2` });
+});
+
+app.get("/api/taf", (req, res) => {
+  const icao = req.query.icao || "KMGM";
+  res.json({
+    raw: `${icao} 251730Z 2518/2618 18005KT P6SM SCT050 BKN200`,
+  });
+});
+
+// NAVAIDs stub
+app.get("/api/navaids", (req, res) => {
+  res.json({ mgm: true, mxf: true });
+});
+
+// BASH stub
+app.get("/api/bash", (req, res) => {
+  res.json({ north: "LOW", south: "LOW" });
+});
+
+// ---- Start server ----
 app.listen(PORT, () => {
   console.log(`🚀 Backend listening on port ${PORT}`);
-  scrapeNotams("KMGM"); // Initial fetch
 });
