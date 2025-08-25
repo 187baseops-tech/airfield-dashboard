@@ -32,45 +32,47 @@ solclientjs.SolclientFactory.init({
 });
 
 // ---------------------------------------
-// Scraper: Fetch baseline NOTAMs from FAA NOTAM Search
+// Scraper: Fetch baseline NOTAMs from FAA PilotWeb
 // ---------------------------------------
 async function fetchBaselineNotams() {
   try {
-    console.log("🌐 Scraping baseline NOTAMs for KMGM...");
+    console.log("🌐 Scraping baseline NOTAMs for KMGM from PilotWeb...");
     const url =
-      "https://notams.aim.faa.gov/notamSearch/search?reportType=Raw&formatType=json&notamType=ALL&locations=KMGM";
+      "https://pilotweb.nas.faa.gov/PilotWeb/notamsSearchAction.do?reportType=RAW&formatType=DOMESTIC&retrieveLocId=KMGM";
 
     const res = await axios.get(url, {
       headers: {
-        "Accept": "application/json",
-        "Referer": "https://notams.aim.faa.gov/notamSearch/",
         "User-Agent": "Mozilla/5.0 (compatible; AirfieldDashboard/1.0)",
       },
     });
 
-    const data = res.data;
+    let html = res.data;
 
-    if (data && Array.isArray(data.notams)) {
-      data.notams.forEach((n) => {
+    // Strip HTML tags
+    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+    // Split by NOTAM markers (usually start with "!" or "KMGM")
+    const notamBlocks = text
+      .split("!")
+      .map(b => b.trim())
+      .filter(b => b.includes("KMGM"));
+
+    if (notamBlocks.length > 0) {
+      notamBlocks.forEach((block, idx) => {
         activeNotams.push({
-          id: n.notamNumber || `BASE-${Date.now()}`,
+          id: `BASE-${Date.now()}-${idx}`,
           icao: "KMGM",
-          text: n.notam || n.raw || "NO TEXT AVAILABLE",
-          startTime: n.startDate || new Date().toISOString(),
-          endTime:
-            n.endDate ||
-            new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          text: "KMGM " + block,
+          startTime: new Date().toISOString(),
+          endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
         });
       });
-      console.log(`✅ Loaded ${data.notams.length} baseline KMGM NOTAMs`);
+      console.log(`✅ Loaded ${notamBlocks.length} baseline KMGM NOTAMs from PilotWeb`);
     } else {
-      console.log(
-        "⚠️ FAA NOTAM Search returned no KMGM NOTAMs. Raw response:",
-        JSON.stringify(data).substring(0, 500)
-      );
+      console.log("⚠️ PilotWeb returned no KMGM NOTAMs (maybe clear airfield)");
     }
   } catch (err) {
-    console.error("❌ Scraper failed to fetch baseline NOTAMs:", err.message);
+    console.error("❌ PilotWeb scraper failed:", err.message);
   }
 }
 
