@@ -13,14 +13,34 @@ app.use(cors());
 app.use(express.json());
 
 let activeNotams = [];
+let navaidsStatus = {
+  ils10: true,
+  ils28: true,
+  mgm: true,  // TACAN MGM
+  mxf: true   // TACAN MXF
+};
 
-// Cleanup expired NOTAMs every 5 min
+// -------------------------
+// Cleanup expired NOTAMs
+// -------------------------
 setInterval(() => {
   const now = new Date();
+  const before = activeNotams.length;
   activeNotams = activeNotams.filter(n => new Date(n.endTime) > now);
+
+  if (activeNotams.length !== before) {
+    // Reset everything to green
+    navaidsStatus = { ils10: true, ils28: true, mgm: true, mxf: true };
+    // Reapply NOTAM effects
+    activeNotams.forEach(n => updateNavaidsFromNotam(n));
+  }
+
   console.log("🧹 Cleaned expired NOTAMs, remaining:", activeNotams.length);
 }, 5 * 60 * 1000);
 
+// -------------------------
+// Env Vars
+// -------------------------
 const {
   SOLACE_HOST,
   SOLACE_VPN,
@@ -33,33 +53,55 @@ solclientjs.SolclientFactory.init({
   profile: solclientjs.SolclientFactoryProfiles.version10,
 });
 
-// ---------------------------------------
-// Helper: clean NOTAM text
-// ---------------------------------------
+// -------------------------
+// Helper: Clean NOTAM text
+// -------------------------
 function cleanNotamText(raw) {
   let text = raw;
 
-  // Remove Q) lines
-  text = text.replace(/Q\)[^\n]+/gi, "").trim();
-
-  // Strip any leading junk before the first "A)"
-  text = text.replace(/^.*?(?=A\))/s, "").trim();
-
-  // Remove CREATED: lines
-  text = text.replace(/CREATED:[^\n]+/gi, "").trim();
-
-  // Remove SOURCE: lines
-  text = text.replace(/SOURCE:[^\n]+/gi, "").trim();
-
-  // Collapse whitespace
-  text = text.replace(/\s+/g, " ").trim();
+  text = text.replace(/^.*?(NOTAM\s)/s, "$1"); // Remove junk before NOTAM
+  text = text.replace(/\([^)]*KMGM[^)]*\)/gi, "(KMGM)"); // Replace long airport names
+  text = text.replace(/\bNOTAM[NRC]\b/gi, ""); // Remove NOTAMN/R/C
+  text = text.replace(/Q\)[^\n]+/gi, "").trim(); // Remove Q lines
+  text = text.replace(/^.*?(?=A\))/s, "").trim(); // Keep A/B/C onwards
+  text = text.replace(/CREATED:[^\n]+/gi, "").trim(); // Remove CREATED
+  text = text.replace(/SOURCE:[^\n]+/gi, "").trim();  // Remove SOURCE
+  text = text.replace(/\s+/g, " ").trim(); // Collapse spaces
 
   return text;
 }
 
-// ---------------------------------------
-// Scraper: Fetch baseline NOTAMs from OurAirports
-// ---------------------------------------
+// -------------------------
+// Helper: NOTAM priority
+// -------------------------
+function notamPriority(text) {
+  const critical = ["CLOSURE", "CLSD", "UNSERVICEABLE", "U/S", "CLOSED"];
+  const high = ["OBSTACLE", "OBSTN", "WORK IN PROGRESS", "WIP"];
+  const medium = ["LIGHT OUT", "LGT U/S", "MARKING", "PAINT", "BIRD"];
+
+  const upper = text.toUpperCase();
+
+  if (critical.some(k => upper.includes(k))) return 1;
+  if (high.some(k => upper.includes(k))) return 2;
+  if (medium.some(k => upper.includes(k))) return 3;
+  return 4;
+}
+
+// -------------------------
+// Helper: Update NAVAIDs
+// -------------------------
+function updateNavaidsFromNotam(notam) {
+  const txt = notam.text.toUpperCase();
+
+  if (/ILS\s*10.*U\/S|ILS RWY 10.*UNSERVICEABLE/.test(txt)) navaidsStatus.ils10 = false;
+  if (/ILS\s*28.*U\/S|ILS RWY 28.*UNSERVICEABLE/.test(txt)) navaidsStatus.ils28 = false;
+  if (/MGM.*TACAN.*U\/S/.test(txt)) navaidsStatus.mgm = false;
+  if (/MXF.*TACAN.*U\/S/.test(txt)) navaidsStatus.mxf = false;
+}
+
+// -------------------------
+// Scraper: Baseline NOTAMs
+// -------------------------
 async function fetchBaselineNotams() {
   try {
     console.log("🌐 Scraping baseline NOTAMs for KMGM from OurAirports...");
@@ -79,37 +121,41 @@ async function fetchBaselineNotams() {
 
     if (notamDivs.length === 0) {
       console.warn("⚠️ Cheerio found no <div class='notam'> elements. Falling back to regex...");
-
       const fallbackMatches = html.match(/NOTAM[\s\S]*?(?=<\/div>|<\/p>)/gi) || [];
+
       fallbackMatches.forEach((block, idx) => {
-        const rawNotam = block.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-        const cleaned = cleanNotamText(rawNotam);
+        const raw = block.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+        const cleaned = cleanNotamText(raw);
 
         if (cleaned.length > 0) {
-          activeNotams.push({
+          const notam = {
             id: `BASE-${Date.now()}-${idx}`,
             icao: "KMGM",
             text: cleaned,
             startTime: new Date().toISOString(),
             endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-          });
+          };
+          activeNotams.push(notam);
+          updateNavaidsFromNotam(notam);
         }
       });
 
       console.log(`✅ Loaded ${activeNotams.length} baseline KMGM NOTAMs (regex fallback)`);
     } else {
       notamDivs.each((idx, el) => {
-        const rawNotam = $(el).text().replace(/\s+/g, " ").trim();
-        const cleaned = cleanNotamText(rawNotam);
+        const raw = $(el).text().replace(/\s+/g, " ").trim();
+        const cleaned = cleanNotamText(raw);
 
         if (cleaned.length > 0) {
-          activeNotams.push({
+          const notam = {
             id: `BASE-${Date.now()}-${idx}`,
             icao: "KMGM",
             text: cleaned,
             startTime: new Date().toISOString(),
             endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-          });
+          };
+          activeNotams.push(notam);
+          updateNavaidsFromNotam(notam);
         }
       });
       console.log(`✅ Loaded ${activeNotams.length} baseline KMGM NOTAMs from OurAirports`);
@@ -119,9 +165,9 @@ async function fetchBaselineNotams() {
   }
 }
 
-// ---------------------------------------
-// SWIM Live Connection
-// ---------------------------------------
+// -------------------------
+// SWIM live feed
+// -------------------------
 function connectToSwim() {
   const session = solclientjs.SolclientFactory.createSession({
     url: SOLACE_HOST,
@@ -152,7 +198,6 @@ function connectToSwim() {
     consumer.on(solclientjs.MessageConsumerEventName.MESSAGE, async (msg) => {
       try {
         let xml = null;
-
         if (msg.getBinaryAttachment && msg.getBinaryAttachment()) {
           xml = msg.getBinaryAttachment().toString();
         }
@@ -160,27 +205,28 @@ function connectToSwim() {
         if (!xml && msg.getTextAttachment) xml = msg.getTextAttachment();
 
         if (!xml) {
-          console.warn("⚠️ SWIM message received with no usable payload.");
+          console.warn("⚠️ SWIM message with no payload");
           return;
         }
-
-        await parseStringPromise(xml).catch(() => {});
-
-        const id = Date.now().toString();
-        const icaoMatch = xml.match(/\b[A-Z]{4}\b/);
-        const icao = icaoMatch ? icaoMatch[0] : "UNKNOWN";
 
         const textRaw = xml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
         const cleaned = cleanNotamText(textRaw);
 
-        if (icao === "KMGM" || cleaned.includes("KMGM")) {
-          const startTime = new Date().toISOString();
-          const endTime = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+        const icao = cleaned.includes("KMGM") ? "KMGM" : "UNKNOWN";
 
-          activeNotams.push({ id, icao, text: cleaned, startTime, endTime });
-          console.log(`📨 Stored KMGM NOTAM:`, cleaned.substring(0, 120));
+        if (icao === "KMGM") {
+          const notam = {
+            id: Date.now().toString(),
+            icao,
+            text: cleaned,
+            startTime: new Date().toISOString(),
+            endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          };
+          activeNotams.push(notam);
+          updateNavaidsFromNotam(notam);
+          console.log(`📨 Stored KMGM NOTAM:`, cleaned.substring(0, 100));
         } else {
-          console.log(`ℹ️ Ignored non-KMGM NOTAM (ICAO=${icao})`);
+          console.log("ℹ️ Ignored non-KMGM NOTAM");
         }
       } catch (err) {
         console.error("NOTAM parse error:", err);
@@ -197,23 +243,27 @@ function connectToSwim() {
   session.connect();
 }
 
-// ---------------------------------------
-// Initialize
-// ---------------------------------------
+// -------------------------
+// Startup
+// -------------------------
 (async () => {
   await fetchBaselineNotams();
   connectToSwim();
 })();
 
-// -------------------
+// -------------------------
 // API Endpoints
-// -------------------
+// -------------------------
 app.get("/api/notams", (req, res) => {
-  let results = activeNotams.filter(
-    (n) => n.icao === "KMGM" || n.text.includes("KMGM")
-  );
+  let results = activeNotams
+    .filter(n => n.icao === "KMGM" || n.text.includes("KMGM"))
+    .sort((a, b) => notamPriority(a.text) - notamPriority(b.text));
 
   res.json({ notams: results });
+});
+
+app.get("/api/navaids", (req, res) => {
+  res.json(navaidsStatus);
 });
 
 app.get("/api/metar", async (req, res) => {
@@ -224,9 +274,7 @@ app.get("/api/metar", async (req, res) => {
     const url = `https://aviationweather.gov/api/data/metar?ids=${icao}&format=json`;
     const response = await axios.get(url);
     const data = response.data;
-
-    if (data && data[0]) res.json({ raw: data[0].rawOb || data[0].raw });
-    else res.json({ raw: "" });
+    res.json({ raw: data?.[0]?.rawOb || data?.[0]?.raw || "" });
   } catch (err) {
     console.error("METAR fetch error:", err.message);
     res.status(500).json({ error: "Failed to fetch METAR" });
@@ -241,9 +289,7 @@ app.get("/api/taf", async (req, res) => {
     const url = `https://aviationweather.gov/api/data/taf?ids=${icao}&format=json`;
     const response = await axios.get(url);
     const data = response.data;
-
-    if (data && data[0]) res.json({ raw: data[0].rawTAF || data[0].raw });
-    else res.json({ raw: "" });
+    res.json({ raw: data?.[0]?.rawTAF || data?.[0]?.raw || "" });
   } catch (err) {
     console.error("TAF fetch error:", err.message);
     res.status(500).json({ error: "Failed to fetch TAF" });
