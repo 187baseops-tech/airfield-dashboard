@@ -1,83 +1,76 @@
 import express from "express";
 import axios from "axios";
 import * as cheerio from "cheerio";
-import solclientjs from "solclientjs";
-
-// --- Config ---
-const PORT = process.env.PORT || 10000;
-const ICAO = "KMGM";
+import cors from "cors";
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
-// --- In-Memory Store ---
-let notams = [];
-let navaids = { mgm: true, mxf: true }; // example toggles
+const PORT = process.env.PORT || 10000;
 
-// --- Helper: Clean NOTAM text ---
-function cleanNotam(text) {
-  if (!text) return null;
-
-  // Remove OurAirports headers/footers
-  text = text
-    .replace(/NOTAMS? @ OurAirports[\s\S]*?Airport/gi, "")
-    .replace(/Toggle navigation[\s\S]*?Help/gi, "")
-    .replace(/NOTAM feed for Montgomery[\s\S]*?rss">/gi, "")
-    .replace(/NOTAM source[\s\S]*$/gi, "")
-    .trim();
-
-  // Strip "NOTAMN" / "NOTAMR"
-  text = text.replace(/\bNOTAM[NR]\b/g, "").trim();
-
-  // Ensure only NOTAMs survive
-  if (!/^(M\d{3,4}\/\d{2}|NOTAM \d{2}\/\d{3}|!\w{3})/i.test(text)) {
-    return null;
-  }
-
-  return text;
-}
-
-// --- Scrape Baseline NOTAMs from OurAirports ---
-async function scrapeBaselineNotams() {
-  console.log(`🌐 Scraping NOTAMs for ${ICAO} from OurAirports...`);
+// ===== NOTAM SCRAPER (OurAirports) =====
+async function scrapeNotams(icao) {
   try {
-    const url = `https://ourairports.com/airports/${ICAO}/notams.html`;
-    const res = await axios.get(url, { timeout: 15000, httpsAgent: new (require("https").Agent)({ rejectUnauthorized: false }) });
+    console.log(`🌐 Scraping NOTAMs for ${icao} from OurAirports...`);
+    const url = `https://ourairports.com/airports/${icao}/notams.html`;
+    const { data: html } = await axios.get(url, { timeout: 15000 });
+    const $ = cheerio.load(html);
 
-    const $ = cheerio.load(res.data);
-    const scraped = [];
+    const notams = [];
 
-    $(".notam, a[href*='notam-']").each((_, el) => {
-      const raw = $(el).text().trim();
-      const cleaned = cleanNotam(raw);
-      if (cleaned) {
-        scraped.push({ id: Date.now() + Math.random(), text: cleaned });
-      }
+    $("a[id^='notam-']").each((i, el) => {
+      let text = $(el).text().trim();
+
+      // Remove long "Montgomery Regional ..." names → leave (KMGM)
+      text = text.replace(/Montgomery Regional \(Dannelly Field\) Airport\s*/gi, "").trim();
+
+      // Hide NOTAMN/NOTAMR markers
+      text = text.replace(/\sNOTAM[N|R]\s?/g, " ");
+
+      // Cleanup spacing
+      text = text.replace(/\s+/g, " ");
+
+      // Keep ID (M0086/25, 08/030, etc.)
+      const idMatch = text.match(/(M\d{4}\/\d{2}|\d{2}\/\d{3,4})/);
+      const id = idMatch ? idMatch[0] : `notam-${i}`;
+
+      notams.push({
+        id,
+        text,
+      });
     });
 
-    if (scraped.length === 0) {
-      console.warn(`⚠️ OurAirports returned no ${ICAO} NOTAMs`);
-    } else {
-      notams = scraped;
-      console.log(`✅ Stored ${scraped.length} NOTAMs for ${ICAO}`);
-    }
+    // Sort: closures, outages, then everything else
+    notams.sort((a, b) => {
+      const crit = (txt) =>
+        /(CLSD|CLOSED|U\/S|UNSERVICEABLE|OUT OF SERVICE)/i.test(txt) ? 0 : 1;
+      return crit(a.text) - crit(b.text);
+    });
+
+    console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
+    return notams;
   } catch (err) {
     console.error(`❌ OurAirports scraper failed: ${err.message}`);
+    return [];
   }
 }
 
-// --- API Endpoints ---
-app.get("/api/notams", (req, res) => {
-  res.json({ notams });
+// ===== API ROUTES =====
+app.get("/api/notams", async (req, res) => {
+  const icao = (req.query.icao || "KMGM").toUpperCase();
+  const notams = await scrapeNotams(icao);
+  res.json({ icao, notams });
 });
 
-app.get("/api/navaids", (req, res) => {
-  res.json(navaids);
+// Example health route
+app.get("/", (req, res) => {
+  res.send("✅ Airfield Dashboard Backend is running.");
 });
 
-// --- Startup ---
+// ===== START SERVER =====
 app.listen(PORT, () => {
   console.log(`🚀 Backend listening on port ${PORT}`);
-  scrapeBaselineNotams();
-  setInterval(scrapeBaselineNotams, 15 * 60 * 1000); // refresh every 15min
+  // Optional: fetch once on startup
+  scrapeNotams("KMGM");
 });
