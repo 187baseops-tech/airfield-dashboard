@@ -65,36 +65,38 @@ function connectToSwim() {
     consumer.on(solclientjs.MessageConsumerEventName.MESSAGE, async msg => {
       try {
         const xml = msg.getBinaryAttachment().toString();
-        const parsed = await parseStringPromise(xml);
 
+        // 🔍 DEBUG STEP 1: Show raw incoming XML
+        console.log("===== RAW NOTAM XML (first 500 chars) =====");
+        console.log(xml.substring(0, 500));
+        console.log("===========================================");
+
+        // Try parsing
+        const parsed = await parseStringPromise(xml, { explicitArray: true });
+
+        // 🔍 DEBUG STEP 1: Show top-level parsed keys
+        console.log("PARSED ROOT KEYS:", Object.keys(parsed));
+
+        // Keep existing attempt (may not work yet)
         const notam = parsed?.digitalNotam?.notam?.[0];
         if (!notam) return;
 
         const id = notam.$?.id || `NOTAM-${Date.now()}`;
         const text = notam.text?.[0] || "UNKNOWN NOTAM";
-
-        const location = notam.location?.[0] || "";
-        const account = notam.account?.[0] || "";
-
-        const startTime =
-          notam.startDateTime?.[0] || new Date().toISOString();
+        const startTime = notam.startDateTime?.[0] || new Date().toISOString();
         const endTime =
           notam.endDateTime?.[0] ||
           new Date(Date.now() + 24 * 3600 * 1000).toISOString();
 
-        // Store with normalized ICAO
-        const icao = (location || account || text).match(/[A-Z]{4}/)?.[0] || "UNKNOWN";
-
-        activeNotams.push({
-          id,
-          text,
-          startTime,
-          endTime,
-          icao,
-        });
-
-        console.log(`📨 NOTAM stored for ${icao}:`, text.split("\n")[0]);
-
+        if (text.includes("KMGM")) {
+          activeNotams.push({
+            id,
+            text,
+            startTime,
+            endTime,
+          });
+          console.log("📨 Active NOTAM stored:", text);
+        }
       } catch (err) {
         console.error("NOTAM parse error:", err);
       }
@@ -120,7 +122,9 @@ app.get("/api/notams", (req, res) => {
   let results = activeNotams;
 
   if (icao) {
-    results = activeNotams.filter(n => n.icao === icao.toUpperCase());
+    results = activeNotams.filter(n =>
+      n.text.includes(icao.toUpperCase())
+    );
   }
 
   res.json({ notams: results });
