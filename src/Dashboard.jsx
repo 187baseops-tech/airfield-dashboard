@@ -112,11 +112,17 @@ function SlidesCard() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const svgRef = useRef();
 
-  const API = process.env.REACT_APP_API_URL;
+  const API = process.env.REACT_APP_API_URL || "https://one87oss-airfield-dashboard.onrender.com";
 
   useEffect(() => {
-    axios.get(`${API}/api/slides`).then(res => setSlides(res.data));
-    axios.get(`${API}/api/annotations`).then(res => setAnnotations(res.data.slides || {}));
+    axios.get(`${API}/api/slides`).then(res => {
+      console.log("🖼️ Slides from API:", res.data);
+      setSlides(res.data);
+    });
+    axios.get(`${API}/api/annotations`).then(res => {
+      console.log("📝 Annotations from API:", res.data);
+      setAnnotations(res.data.slides || {});
+    });
   }, [API]);
 
   useEffect(() => {
@@ -133,7 +139,215 @@ function SlidesCard() {
     axios.post(`${API}/api/annotations`, { slides: updated });
   };
 
-  // ... [SlidesCard rest remains unchanged]
+  const prevSlide = () => setCurrentSlide(s => (s - 1 + slides.length) % slides.length);
+  const nextSlide = () => setCurrentSlide(s => (s + 1) % slides.length);
+
+  const handleClick = (e) => {
+    if (!tool || slides.length === 0) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const file = slides[currentSlide];
+    if (!file) return;
+
+    const slideKey = file;
+    const annots = { ...annotations };
+    if (!annots[slideKey]) annots[slideKey] = [];
+    if (tool === "x") annots[slideKey].push({ type: "x", x, y });
+    else if (tool === "text") {
+      const text = prompt("Enter note:");
+      if (text) annots[slideKey].push({ type: "text", x, y, text });
+    }
+    saveAnnotations(annots);
+  };
+
+  const handleDragStart = (e) => {
+    if (!tool || slides.length === 0) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    svgRef.current.dataset.startX = e.clientX - rect.left;
+    svgRef.current.dataset.startY = e.clientY - rect.top;
+  };
+
+  const handleDragEnd = (e) => {
+    if (!tool || slides.length === 0) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const x2 = e.clientX - rect.left;
+    const y2 = e.clientY - rect.top;
+    const x1 = parseFloat(svgRef.current.dataset.startX);
+    const y1 = parseFloat(svgRef.current.dataset.startY);
+    const file = slides[currentSlide];
+    if (!file) return;
+
+    const slideKey = file;
+    const annots = { ...annotations };
+    if (!annots[slideKey]) annots[slideKey] = [];
+    if (tool === "box") {
+      annots[slideKey].push({
+        type: "box",
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        w: Math.abs(x2 - x1),
+        h: Math.abs(y2 - y1)
+      });
+    } else if (tool === "arrow") {
+      annots[slideKey].push({ type: "arrow", x1, y1, x2, y2 });
+    }
+    saveAnnotations(annots);
+  };
+
+  const clearAnnotations = () => {
+    if (slides.length === 0) return;
+    const file = slides[currentSlide];
+    if (!file) return;
+
+    const slideKey = file;
+    const annots = { ...annotations, [slideKey]: [] };
+    saveAnnotations(annots);
+  };
+
+  if (slides.length === 0) {
+    return (
+      <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px] md:col-span-2">
+        <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
+        <p className="text-sm text-slate-400">No slides available.</p>
+      </section>
+    );
+  }
+
+  const file = slides[currentSlide] || null;
+  const slideKey = file || "unknown";
+
+  const viewer = file ? (
+    <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-full">
+      <img
+        src={`${API}/slides/${file}`} 
+        alt="Slide"
+        className="object-contain max-h-full max-w-full"
+      />
+      <svg
+        ref={svgRef}
+        className="absolute inset-0 w-full h-full"
+        onClick={handleClick}
+        onMouseDown={handleDragStart}
+        onMouseUp={handleDragEnd}
+      >
+        <defs>
+          <marker
+            id="arrowhead"
+            markerWidth="10"
+            markerHeight="7"
+            refX="10"
+            refY="3.5"
+            orient="auto"
+          >
+            <polygon points="0 0, 10 3.5, 0 7" fill="green" />
+          </marker>
+        </defs>
+        {annotations[slideKey]?.map((a, i) => {
+          if (a.type === "box")
+            return (
+              <rect
+                key={i}
+                x={a.x}
+                y={a.y}
+                width={a.w}
+                height={a.h}
+                className="stroke-red-600 fill-transparent"
+              />
+            );
+          if (a.type === "x")
+            return (
+              <text key={i} x={a.x} y={a.y} fontSize="32" fill="red" fontWeight="bold">
+                X
+              </text>
+            );
+          if (a.type === "arrow")
+            return (
+              <line
+                key={i}
+                x1={a.x1}
+                y1={a.y1}
+                x2={a.x2}
+                y2={a.y2}
+                stroke="green"
+                strokeWidth="4"
+                markerEnd="url(#arrowhead)"
+              />
+            );
+          if (a.type === "text")
+            return (
+              <foreignObject key={i} x={a.x} y={a.y} width="200" height="50">
+                <div
+                  className="px-1 text-sm font-bold text-white bg-black border border-red-600 rounded"
+                  style={{ display: "inline-block", maxWidth: "180px", wordWrap: "break-word" }}
+                >
+                  {a.text}
+                </div>
+              </foreignObject>
+            );
+          return null;
+        })}
+      </svg>
+    </div>
+  ) : (
+    <p className="text-slate-400">No slide selected.</p>
+  );
+
+  return (
+    <>
+      {/* Card View */}
+      {!isFullscreen && (
+        <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
+          <h2 className="text-lg font-bold underline mb-2 flex justify-between items-center">
+            Airfield Slides
+            <button
+              onClick={() => setIsFullscreen(true)}
+              className="px-2 py-1 bg-slate-700 rounded text-sm"
+            >
+              🔎 Expand
+            </button>
+          </h2>
+
+          <div className="relative bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[500px]">
+            {file ? (
+              <img
+                src={`${API}/slides/${file}`} 
+                alt="Slide"
+                className="absolute inset-0 w-full h-full object-contain"
+              />
+            ) : (
+              <p className="text-slate-400">No slide selected.</p>
+            )}
+            <svg
+              ref={svgRef}
+              className="absolute inset-0 w-full h-full"
+              onClick={handleClick}
+              onMouseDown={handleDragStart}
+              onMouseUp={handleDragEnd}
+            >
+              {/* Annotation rendering would go here */}
+            </svg>
+          </div>
+        </section>
+      )}
+
+      {/* Fullscreen View */}
+      {isFullscreen && (
+        <div className="fixed inset-0 z-50 bg-black bg-opacity-95 flex flex-col">
+          <div className="flex justify-between items-center p-3 text-white">
+            <h2 className="text-lg font-bold">Airfield Slides</h2>
+            <button
+              onClick={() => setIsFullscreen(false)}
+              className="px-2 py-1 bg-red-600 rounded"
+            >
+              ❌ Close
+            </button>
+          </div>
+          <div className="flex-1 flex items-center justify-center">{viewer}</div>
+        </div>
+      )}
+    </>
+  );
 }
 // --- Main Dashboard ---
 export default function Dashboard() {
