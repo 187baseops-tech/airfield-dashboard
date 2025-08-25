@@ -15,7 +15,7 @@ async function scrapeNotams(icao) {
   try {
     console.log(`🌐 Scraping NOTAMs for ${icao} from OurAirports...`);
 
-    // Per-request agent (ignores cert errors only for this request)
+    // Per-request agent (ignore cert errors only for this request)
     const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
     const { data: html } = await axios.get(
@@ -26,13 +26,12 @@ async function scrapeNotams(icao) {
     const $ = cheerio.load(html);
 
     const results = [];
-    $("a[id^=notam-]").each((i, el) => {
+    // Look at all text nodes and catch any that start with NOTAM
+    $("body *").each((i, el) => {
       const text = $(el).text().trim();
-
-      // Accept NOTAMs containing KMGM or !MGM
-      if (text.includes("KMGM") || text.includes("!MGM")) {
+      if (text.startsWith("NOTAM") && (text.includes("KMGM") || text.includes("!MGM"))) {
         results.push({
-          id: $(el).attr("id"),
+          id: `notam-${i}`,
           text: cleanNotamText(text),
         });
       }
