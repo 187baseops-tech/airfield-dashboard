@@ -80,7 +80,6 @@ function lookupFits(tempF, dewF) {
 
   return { level, f: value };
 }
-
 // --- SlidesCard ---
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
@@ -181,14 +180,13 @@ function SlidesCard() {
     );
   }
 
-  const file = slides[currentSlide]; // e.g. "airfieldconstruction.png"
+  const file = slides[currentSlide];
   const slideKey = file;
 
-  // Viewer used in fullscreen
   const viewer = (
     <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-full">
       <img
-        src={`${API}/slides/${file}`}   // ✅ fixed path
+        src={`${API}/slides/${file}`} 
         alt="Slide"
         className="object-contain max-h-full max-w-full"
       />
@@ -199,7 +197,62 @@ function SlidesCard() {
         onMouseDown={handleDragStart}
         onMouseUp={handleDragEnd}
       >
-        {/* annotation defs + mapping here */}
+        <defs>
+          <marker
+            id="arrowhead"
+            markerWidth="10"
+            markerHeight="7"
+            refX="10"
+            refY="3.5"
+            orient="auto"
+          >
+            <polygon points="0 0, 10 3.5, 0 7" fill="green" />
+          </marker>
+        </defs>
+        {annotations[slideKey]?.map((a, i) => {
+          if (a.type === "box")
+            return (
+              <rect
+                key={i}
+                x={a.x}
+                y={a.y}
+                width={a.w}
+                height={a.h}
+                className="stroke-red-600 fill-transparent"
+              />
+            );
+          if (a.type === "x")
+            return (
+              <text key={i} x={a.x} y={a.y} fontSize="32" fill="red" fontWeight="bold">
+                X
+              </text>
+            );
+          if (a.type === "arrow")
+            return (
+              <line
+                key={i}
+                x1={a.x1}
+                y1={a.y1}
+                x2={a.x2}
+                y2={a.y2}
+                stroke="green"
+                strokeWidth="4"
+                markerEnd="url(#arrowhead)"
+              />
+            );
+          if (a.type === "text")
+            return (
+              <foreignObject key={i} x={a.x} y={a.y} width="200" height="50">
+                <div
+                  className="px-1 text-sm font-bold text-white bg-black border border-red-600 rounded"
+                  style={{ display: "inline-block", maxWidth: "180px", wordWrap: "break-word" }}
+                >
+                  {a.text}
+                </div>
+              </foreignObject>
+            );
+          return null;
+        })}
       </svg>
     </div>
   );
@@ -221,7 +274,7 @@ function SlidesCard() {
 
           <div className="relative bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[500px]">
             <img
-              src={`${API}/slides/${file}`}   // ✅ fixed path
+              src={`${API}/slides/${file}`} 
               alt="Slide"
               className="absolute inset-0 w-full h-full object-contain"
             />
@@ -232,7 +285,7 @@ function SlidesCard() {
               onMouseDown={handleDragStart}
               onMouseUp={handleDragEnd}
             >
-              {/* annotation defs + mapping here */}
+              {/* Annotation rendering same as above */}
             </svg>
           </div>
         </section>
@@ -256,85 +309,8 @@ function SlidesCard() {
     </>
   );
 }
-
-      {/* Fullscreen View */}
-      {isFullscreen && (
-        <div className="fixed inset-0 z-50 bg-black bg-opacity-95 flex flex-col">
-          <div className="flex justify-between items-center p-3 text-white">
-            <h2 className="text-lg font-bold">Airfield Slides</h2>
-            <button
-              onClick={() => setIsFullscreen(false)}
-              className="px-2 py-1 bg-red-600 rounded"
-            >
-              ❌ Close
-            </button>
-          </div>
-
-          {/* Viewer */}
-          <div className="flex-1 flex items-center justify-center">{viewer}</div>
-
-          {/* Controls */}
-          <div className="flex justify-center gap-2 mb-2 mt-2">
-            <button onClick={prevSlide} className="px-3 py-1 bg-slate-700 rounded">⬅️</button>
-            {isPlaying ? (
-              <button
-                onClick={() => setIsPlaying(false)}
-                className="px-3 py-1 bg-red-600 rounded"
-              >
-                ⏹️ Stop
-              </button>
-            ) : (
-              <button
-                onClick={() => setIsPlaying(true)}
-                className="px-3 py-1 bg-green-600 rounded"
-              >
-                ▶️ Play
-              </button>
-            )}
-            <button onClick={nextSlide} className="px-3 py-1 bg-slate-700 rounded">➡️</button>
-          </div>
-
-          {/* Annotation Toolbar */}
-          <div className="flex justify-center gap-2 mt-2 mb-4">
-            <button
-              onClick={() => setTool("box")}
-              className={tool === "box" ? "bg-blue-600 px-2 py-1 rounded" : "bg-slate-700 px-2 py-1 rounded"}
-            >
-              🟥 Box
-            </button>
-            <button
-              onClick={() => setTool("x")}
-              className={tool === "x" ? "bg-blue-600 px-2 py-1 rounded" : "bg-slate-700 px-2 py-1 rounded"}
-            >
-              ❌ X
-            </button>
-            <button
-              onClick={() => setTool("arrow")}
-              className={tool === "arrow" ? "bg-blue-600 px-2 py-1 rounded" : "bg-slate-700 px-2 py-1 rounded"}
-            >
-              ➡ Arrow
-            </button>
-            <button
-              onClick={() => setTool("text")}
-              className={tool === "text" ? "bg-blue-600 px-2 py-1 rounded" : "bg-slate-700 px-2 py-1 rounded"}
-            >
-              📝 Text
-            </button>
-            <button
-              onClick={clearAnnotations}
-              className="bg-red-600 px-2 py-1 rounded"
-            >
-              🗑 Clear
-            </button>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-// --- Main Dashboard --- // 
+// --- Main Dashboard ---
 export default function Dashboard() {
-
   const ICAO = "KMGM";
 
   const [metar, setMetar] = useState("");
@@ -391,7 +367,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    const timer = setInterval(fetchData, 300000);
+    const timer = setInterval(fetchData, 300000); // refresh every 5 min
     return () => clearInterval(timer);
   }, []);
 
@@ -419,6 +395,7 @@ export default function Dashboard() {
     // --- ALT REQ Logic ---
     let altNeeded = false;
 
+    // METAR check
     if (
       p.ceiling &&
       /^(BKN|OVC)\d{3}/.test(p.ceiling) &&
@@ -428,9 +405,64 @@ export default function Dashboard() {
       altNeeded = true;
     }
 
+    // TAF check (within 2h)
+    const now = new Date();
+    const twoHours = new Date(now.getTime() + 2 * 60 * 60 * 1000);
+
+    const tafHeader = taf.match(/(\d{6})Z/);
+    if (tafHeader) {
+      const day = parseInt(tafHeader[1].slice(0, 2));
+      const hour = parseInt(tafHeader[1].slice(2, 4));
+      const min = parseInt(tafHeader[1].slice(4, 6));
+
+      const baseDate = new Date(now);
+      baseDate.setUTCDate(day);
+      baseDate.setUTCHours(hour, min, 0, 0);
+
+      const tafSegments = taf.split("\n");
+      for (const seg of tafSegments) {
+        const fmMatch = seg.match(/FM(\d{2})(\d{2})/);
+        const tempoMatch = seg.match(/TEMPO (\d{2})(\d{2})\/(\d{2})(\d{2})/);
+        const becmgMatch = seg.match(/BECMG (\d{2})(\d{2})\/(\d{2})(\d{2})/);
+
+        let segStart = null, segEnd = null;
+
+        if (fmMatch) {
+          segStart = new Date(baseDate);
+          segStart.setUTCHours(parseInt(fmMatch[1]), parseInt(fmMatch[2]), 0, 0);
+          segEnd = new Date(segStart.getTime() + 3 * 60 * 60 * 1000);
+        } else if (tempoMatch) {
+          segStart = new Date(baseDate);
+          segStart.setUTCDate(day);
+          segStart.setUTCHours(parseInt(tempoMatch[1]), parseInt(tempoMatch[2]));
+          segEnd = new Date(baseDate);
+          segEnd.setUTCDate(day);
+          segEnd.setUTCHours(parseInt(tempoMatch[3]), parseInt(tempoMatch[4]));
+        } else if (becmgMatch) {
+          segStart = new Date(baseDate);
+          segStart.setUTCHours(parseInt(becmgMatch[1]), parseInt(becmgMatch[2]));
+          segEnd = new Date(baseDate);
+          segEnd.setUTCHours(parseInt(becmgMatch[3]), parseInt(becmgMatch[4]));
+        }
+
+        if (segStart && segStart <= twoHours && now >= segStart && now <= segEnd) {
+          const cMatch = seg.match(/(BKN|OVC)(\d{3})/);
+          const vMatch = seg.match(/(\d{1,2}(?: \d\/\d)?SM)/);
+
+          if (cMatch && vMatch) {
+            const h = parseInt(cMatch[2], 10) * 100;
+            const miles = parseVisibility(vMatch[1]);
+            if (h <= 1500 && miles < 3) {
+              altNeeded = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
     setAltReq(altNeeded);
   }, [metar, taf]);
-
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4">
       {/* Header */}
@@ -465,9 +497,7 @@ export default function Dashboard() {
             <p className="font-semibold">Active Runway</p>
             <button
               className="px-3 py-1 rounded bg-green-600"
-              onClick={() =>
-                setActiveRunway(activeRunway === "10" ? "28" : "10")
-              }
+              onClick={() => setActiveRunway(activeRunway === "10" ? "28" : "10")}
             >
               {activeRunway}
             </button>
@@ -486,9 +516,7 @@ export default function Dashboard() {
                     : "bg-slate-700"
                 }`}
                 onClick={() =>
-                  setRsc(
-                    rsc === "DRY" ? "WET" : rsc === "WET" ? "N/A" : "DRY"
-                  )
+                  setRsc(rsc === "DRY" ? "WET" : rsc === "WET" ? "N/A" : "DRY")
                 }
               >
                 {rsc}
@@ -502,6 +530,7 @@ export default function Dashboard() {
               />
             </div>
           </div>
+
           {/* Barriers */}
           <div className="mb-2">
             <p className="font-semibold">Barriers</p>
@@ -581,7 +610,6 @@ export default function Dashboard() {
             </button>
           </div>
         </section>
-
         {/* Weather */}
         <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
           <div className="flex items-center gap-2 mb-2">
@@ -734,5 +762,4 @@ export default function Dashboard() {
     </div>
   );
 }
-
 
