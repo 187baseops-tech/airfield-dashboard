@@ -351,19 +351,22 @@ export default function Dashboard() {
   const API = process.env.REACT_APP_API_URL;
 
   async function fetchData() {
-    try {
-      const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
-      const t = await axios.get(`${API}/api/taf?icao=${ICAO}`);
-      const n = await axios.get(`${API}/api/notams?icao=${ICAO}`);
+  try {
+    const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
+    const t = await axios.get(`${API}/api/taf?icao=${ICAO}`);
+    const n = await axios.get(`${API}/api/notams?icao=${ICAO}`);
 
-      setMetar(m.data.raw || "");
-      setTaf(t.data.raw || "");
-      setNotams(n.data?.notams || []);
-      setLastUpdate(new Date());
-    } catch (err) {
-      console.error("Fetch error:", err);
-    }
+    // ✅ Handle new NOAA schema + old schema fallback
+    setMetar(m.data.rawOb || m.data.raw || "");
+    setTaf(t.data.rawTAF || t.data.raw || "");
+    setNotams(n.data?.notams || []);
+    setLastUpdate(new Date());
+  } catch (err) {
+    console.error("Fetch error:", err);
   }
+}
+
+
 
   useEffect(() => {
     fetchData();
