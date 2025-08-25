@@ -31,6 +31,38 @@ solclientjs.SolclientFactory.init({
   profile: solclientjs.SolclientFactoryProfiles.version10,
 });
 
+// ---------------------------------------
+// Fetch baseline NOTAMs from FAA API
+// ---------------------------------------
+async function fetchBaselineNotams() {
+  try {
+    console.log("🌐 Fetching baseline NOTAMs for KMGM...");
+    const url = "https://aviationweather.gov/api/data/notams?ids=KMGM&format=json";
+    const res = await axios.get(url);
+    const data = res.data;
+
+    if (Array.isArray(data)) {
+      data.forEach(n => {
+        activeNotams.push({
+          id: n.id || `BASE-${Date.now()}`,
+          icao: "KMGM",
+          text: n.raw || n.text || "NO TEXT AVAILABLE",
+          startTime: n.startdate || new Date().toISOString(),
+          endTime: n.enddate || new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+        });
+      });
+      console.log(`✅ Loaded ${data.length} baseline KMGM NOTAMs`);
+    } else {
+      console.log("⚠️ No baseline NOTAMs found in FAA API response");
+    }
+  } catch (err) {
+    console.error("❌ Failed to fetch baseline NOTAMs:", err.message);
+  }
+}
+
+// ---------------------------------------
+// SWIM Live Connection
+// ---------------------------------------
 function connectToSwim() {
   const session = solclientjs.SolclientFactory.createSession({
     url: SOLACE_HOST,
@@ -69,15 +101,12 @@ function connectToSwim() {
         if (msg.getBinaryAttachment && msg.getBinaryAttachment()) {
           xml = msg.getBinaryAttachment().toString();
         }
-
         if (!xml && msg.getXmlContent) {
           xml = msg.getXmlContent();
         }
-
         if (!xml && msg.getTextAttachment) {
           xml = msg.getTextAttachment();
         }
-
         if (!xml && msg.getSdtContainer) {
           const sdt = msg.getSdtContainer();
           if (sdt) {
@@ -145,7 +174,13 @@ function connectToSwim() {
   session.connect();
 }
 
-connectToSwim();
+// ---------------------------------------
+// Initialize
+// ---------------------------------------
+(async () => {
+  await fetchBaselineNotams();
+  connectToSwim();
+})();
 
 // -------------------
 // API Endpoints
