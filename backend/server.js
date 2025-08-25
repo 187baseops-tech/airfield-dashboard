@@ -78,20 +78,12 @@ app.get("/api/taf", async (req, res) => {
   }
 });
 
-// NOTAMs
+// NOTAMs (using NOAA aviationweather.gov)
 app.get("/api/notams", async (req, res) => {
   try {
     const { icao } = req.query;
-    const url = `https://notams.aim.faa.gov/notamSearch/search?designators=${icao}&format=json`;
-
-    const { data } = await axios.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115 Safari/537.36",
-        "Accept": "application/json,text/plain,*/*",
-        "Accept-Language": "en-US,en;q=0.9",
-      },
-      timeout: 10000, // avoid Render timing out
-    });
+    const url = `https://aviationweather.gov/api/data/notam?ids=${icao}&format=json`;
+    const { data } = await axios.get(url, { timeout: 10000 });
 
     res.json({ notams: data || [] });
   } catch (err) {
@@ -99,6 +91,7 @@ app.get("/api/notams", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch NOTAMs" });
   }
 });
+
 
 
 // ---- Start Server ----
