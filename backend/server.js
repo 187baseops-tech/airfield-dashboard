@@ -17,20 +17,14 @@ app.use(bodyParser.json());
 function cleanNotam(raw) {
   if (!raw) return "";
 
-  // Replace long airport names with just (KMGM)
   raw = raw.replace(/Montgomery Regional \(Dannelly Field\) Airport\s*/gi, "(KMGM)");
-
-  // Remove NOTAMN / NOTAMR tags
   raw = raw.replace(/\bNOTAMN\b/g, "");
   raw = raw.replace(/\bNOTAMR\b/g, "");
-
-  // Remove navigation / header junk
   raw = raw.replace(/NOTAMS @ OurAirports[\s\S]*?NOTAM source.*?\n/gi, "");
 
-  // Split into lines and only keep relevant fields
   const lines = raw.split("\n").map(l => l.trim());
   const filtered = lines.filter(l =>
-    l.match(/^\w{1}\d{4}\/\d{2}/) ||  // ID e.g. M0086/25
+    l.match(/^\w{1}\d{4}\/\d{2}/) || // ID e.g. M0086/25
     l.startsWith("A)") ||
     l.startsWith("B)") ||
     l.startsWith("C)") ||
@@ -47,13 +41,13 @@ async function scrapeOurAirports(icao) {
   try {
     const url = `https://ourairports.com/airports/${icao}/notams.html`;
     const res = await axios.get(url, {
-      httpsAgent: new https.Agent({ rejectUnauthorized: false }) // ✅ bypass SSL issues
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }) // bypass SSL issues
     });
 
     const $ = cheerio.load(res.data);
-
     const notams = [];
-    $(".notam").each((_, el) => {   // ✅ grab div.notam blocks
+
+    $(".notam, a[href*='notam-']").each((_, el) => {
       const text = $(el).text().trim();
       const cleaned = cleanNotam(text);
       if (cleaned) {
@@ -71,8 +65,6 @@ async function scrapeOurAirports(icao) {
 // =======================
 // ROUTES
 // =======================
-
-// NOTAMs
 app.get("/api/notams", async (req, res) => {
   const icao = (req.query.icao || "KMGM").toUpperCase();
   console.log(`🌐 Scraping NOTAMs for ${icao} from OurAirports...`);
@@ -83,25 +75,17 @@ app.get("/api/notams", async (req, res) => {
   res.json({ notams });
 });
 
-// Dummy METAR + TAF for testing (replace with real feed if needed)
+// Dummy METAR + TAF for now
 app.get("/api/metar", async (req, res) => {
   res.json({ raw: "KMGM 251953Z 18008KT 10SM CLR 32/21 A2992" });
 });
-
 app.get("/api/taf", async (req, res) => {
   res.json({ raw: "KMGM 251720Z 2518/2618 18010KT P6SM SCT040" });
 });
 
-// Dummy NAVAIDs (replace with SWIM-driven updates if hooked)
-let navaids = {
-  mgm: true,
-  mxf: true,
-  ils: true,
-};
-
-app.get("/api/navaids", (req, res) => {
-  res.json(navaids);
-});
+// Dummy NAVAIDs
+let navaids = { mgm: true, mxf: true, ils: true };
+app.get("/api/navaids", (req, res) => res.json(navaids));
 
 // =======================
 // START SERVER
