@@ -1,9 +1,9 @@
 import express from "express";
 import axios from "axios";
-import * as cheerio from "cheerio";   
+import * as cheerio from "cheerio";
+import https from "https";
 import cors from "cors";
 import bodyParser from "body-parser";
-
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -46,11 +46,14 @@ function cleanNotam(raw) {
 async function scrapeOurAirports(icao) {
   try {
     const url = `https://ourairports.com/airports/${icao}/notams.html`;
-    const res = await axios.get(url);
+    const res = await axios.get(url, {
+      httpsAgent: new https.Agent({ rejectUnauthorized: false }) // ✅ bypass SSL issues
+    });
+
     const $ = cheerio.load(res.data);
 
     const notams = [];
-    $("a[href^='/airports/']").each((_, el) => {
+    $(".notam").each((_, el) => {   // ✅ grab div.notam blocks
       const text = $(el).text().trim();
       const cleaned = cleanNotam(text);
       if (cleaned) {
@@ -80,7 +83,7 @@ app.get("/api/notams", async (req, res) => {
   res.json({ notams });
 });
 
-// Dummy METAR + TAF for testing (hook your real API here)
+// Dummy METAR + TAF for testing (replace with real feed if needed)
 app.get("/api/metar", async (req, res) => {
   res.json({ raw: "KMGM 251953Z 18008KT 10SM CLR 32/21 A2992" });
 });
