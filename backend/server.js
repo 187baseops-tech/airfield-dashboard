@@ -32,32 +32,30 @@ solclientjs.SolclientFactory.init({
 });
 
 // ---------------------------------------
-// Fetch baseline NOTAMs from FAA NOTAM API
+// Fetch baseline NOTAMs from AWC API
 // ---------------------------------------
 async function fetchBaselineNotams() {
   try {
     console.log("🌐 Fetching baseline NOTAMs for KMGM...");
-    const url = "https://notamsapi.faa.gov/api/v1/notams?location=KMGM";
+    const url = "https://aviationweather.gov/api/data/notams?ids=KMGM&format=json";
     const res = await axios.get(url, {
-      headers: { "User-Agent": "AirfieldDashboard/1.0" },
+      headers: { "User-Agent": "AirfieldDashboard/1.0" }
     });
     const data = res.data;
 
     if (Array.isArray(data)) {
-      data.forEach((n) => {
+      data.forEach(n => {
         activeNotams.push({
-          id: n.notamNumber || `BASE-${Date.now()}`,
+          id: n.id || `BASE-${Date.now()}`,
           icao: "KMGM",
-          text: n.notam || n.rawText || "NO TEXT AVAILABLE",
-          startTime: n.startDate || new Date().toISOString(),
-          endTime:
-            n.endDate ||
-            new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          text: n.raw || "NO TEXT AVAILABLE",
+          startTime: n.startdate || new Date().toISOString(),
+          endTime: n.enddate || new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
         });
       });
       console.log(`✅ Loaded ${data.length} baseline KMGM NOTAMs`);
     } else {
-      console.log("⚠️ No baseline NOTAMs found in FAA NOTAM API response");
+      console.log("⚠️ No baseline NOTAMs found in FAA AWC API response");
     }
   } catch (err) {
     console.error("❌ Failed to fetch baseline NOTAMs:", err.message);
@@ -138,9 +136,6 @@ function connectToSwim() {
           })
           .catch(() => {});
 
-        // -------------------------------
-        // AIXM Regex Fallback Parser
-        // -------------------------------
         const id = Date.now().toString();
 
         // Extract ICAO (first 4-letter code)
@@ -193,7 +188,6 @@ function connectToSwim() {
 // API Endpoints
 // -------------------
 app.get("/api/notams", (req, res) => {
-  // ✅ Only return KMGM NOTAMs
   let results = activeNotams.filter(
     (n) => n.icao === "KMGM" || n.text.includes("KMGM")
   );
