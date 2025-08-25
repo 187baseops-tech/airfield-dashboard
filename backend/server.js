@@ -45,12 +45,13 @@ function saveState() {
 }
 
 // ---- Slides / Annotations ----
-const SLIDES_DIR = path.join(process.cwd(), "data/slides");
-const ANNOT_FILE = "./data/annotations.json";
+// step out of /backend so we can reach /data/slides
+const SLIDES_DIR = path.join(process.cwd(), "../data/slides");
+const ANNOT_FILE = path.join(process.cwd(), "../data/annotations.json");
 
-// Log at startup so we know what path is being used
 console.log("⚙️ process.cwd():", process.cwd());
 console.log("⚙️ SLIDES_DIR is set to:", SLIDES_DIR);
+console.log("⚙️ ANNOT_FILE is set to:", ANNOT_FILE);
 
 // ---- NOTAM Scraper ----
 async function fetchNotams(icao = "KMGM") {
