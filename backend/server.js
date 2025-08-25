@@ -32,12 +32,12 @@ solclientjs.SolclientFactory.init({
 });
 
 // ---------------------------------------
-// Scraper: Fetch baseline NOTAMs from OurAirports
+// Scraper: Fetch baseline NOTAMs from OurAirports (HTTP)
 // ---------------------------------------
 async function fetchBaselineNotams() {
   try {
     console.log("🌐 Scraping baseline NOTAMs for KMGM from OurAirports...");
-    const url = "https://ourairports.com/airports/KMGM/notams.html";
+    const url = "http://ourairports.com/airports/KMGM/notams.html"; // use HTTP
 
     const res = await axios.get(url, {
       headers: {
@@ -47,8 +47,11 @@ async function fetchBaselineNotams() {
 
     const html = res.data;
 
-    // Extract NOTAMs inside <pre> tags
-    const matches = [...html.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/gi)];
+    // Match <pre> or <div class="notam">
+    const matches = [
+      ...html.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/gi),
+      ...html.matchAll(/<div[^>]*class=["']notam["'][^>]*>([\s\S]*?)<\/div>/gi),
+    ];
 
     if (matches.length > 0) {
       matches.forEach((m, idx) => {
@@ -159,9 +162,7 @@ function connectToSwim() {
 
         if (icao === "KMGM" || text.includes("KMGM")) {
           const startTime = new Date().toISOString();
-          const endTime = new Date(
-            Date.now() + 24 * 3600 * 1000
-          ).toISOString();
+          const endTime = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
 
           activeNotams.push({ id, icao, text, startTime, endTime });
           console.log(`📨 Stored KMGM NOTAM:`, text.substring(0, 120));
