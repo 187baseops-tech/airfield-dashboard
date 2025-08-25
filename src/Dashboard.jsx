@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import fitsTable from "../data/fitsTable.json";
+import fitsTable from "./data/fitsTable.json";
 
 // --- Helpers ---
 function highlightTaf(rawTaf) {
