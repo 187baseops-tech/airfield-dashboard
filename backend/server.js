@@ -48,16 +48,17 @@ function connectToSwim() {
   session.on(solclientjs.SessionEventCode.UP_NOTICE, () => {
     console.log("✅ Connected to FAA SWIM NOTAM feed");
 
-    const flowProps = new solclientjs.FlowProperties();
-    flowProps.flowStartState = true;
-    flowProps.transportWindowSize = 10;
-    flowProps.ackMode = solclientjs.MessageConsumerAckMode.CLIENT;
-    flowProps.queueDescriptor = {
-      type: solclientjs.QueueType.QUEUE,
-      name: SWIM_QUEUE,
-    };
+    // ✅ FIX: no FlowProperties constructor
+    const consumer = session.createMessageConsumer({
+      flowStartState: true,
+      transportWindowSize: 10,
+      ackMode: solclientjs.MessageConsumerAckMode.CLIENT,
+      queueDescriptor: {
+        type: solclientjs.QueueType.QUEUE,
+        name: SWIM_QUEUE,
+      },
+    });
 
-    const consumer = session.createMessageConsumer(flowProps);
     consumer.on(solclientjs.MessageConsumerEventName.UP, () => {
       console.log("📡 MessageConsumer is UP and bound to queue.");
     });
@@ -71,13 +72,12 @@ function connectToSwim() {
         console.log(xml.substring(0, 500));
         console.log("===========================================");
 
-        // Try parsing
         const parsed = await parseStringPromise(xml, { explicitArray: true });
 
-        // 🔍 DEBUG STEP 1: Show top-level parsed keys
+        // 🔍 DEBUG: top-level keys
         console.log("PARSED ROOT KEYS:", Object.keys(parsed));
 
-        // Keep existing attempt (may not work yet)
+        // Current placeholder parsing
         const notam = parsed?.digitalNotam?.notam?.[0];
         if (!notam) return;
 
