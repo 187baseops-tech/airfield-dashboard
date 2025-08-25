@@ -37,28 +37,27 @@ solclientjs.SolclientFactory.init({
 async function fetchBaselineNotams() {
   try {
     console.log("🌐 Fetching baseline NOTAMs for KMGM...");
-    const url =
-      "https://notams.aim.faa.gov/notamSearch/search?reportType=Raw&formatType=json&locations=KMGM";
+    const url = "https://notamsapi.faa.gov/api/v1/notams?location=KMGM";
     const res = await axios.get(url, {
       headers: { "User-Agent": "AirfieldDashboard/1.0" },
     });
     const data = res.data;
 
-    if (data && Array.isArray(data.notams)) {
-      data.notams.forEach((n) => {
+    if (Array.isArray(data)) {
+      data.forEach((n) => {
         activeNotams.push({
           id: n.notamNumber || `BASE-${Date.now()}`,
           icao: "KMGM",
-          text: n.notam || n.raw || "NO TEXT AVAILABLE",
+          text: n.notam || n.rawText || "NO TEXT AVAILABLE",
           startTime: n.startDate || new Date().toISOString(),
           endTime:
             n.endDate ||
             new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
         });
       });
-      console.log(`✅ Loaded ${data.notams.length} baseline KMGM NOTAMs`);
+      console.log(`✅ Loaded ${data.length} baseline KMGM NOTAMs`);
     } else {
-      console.log("⚠️ No baseline NOTAMs found in FAA API response");
+      console.log("⚠️ No baseline NOTAMs found in FAA NOTAM API response");
     }
   } catch (err) {
     console.error("❌ Failed to fetch baseline NOTAMs:", err.message);
