@@ -63,12 +63,11 @@ function connectToSwim() {
 
     consumer.on(solclientjs.MessageConsumerEventName.MESSAGE, async msg => {
       try {
-        // ✅ Safe payload handling
+        // ✅ Safe payload extraction
         let xml = null;
 
-        if (msg.getBinaryAttachment) {
-          const bin = msg.getBinaryAttachment();
-          if (bin) xml = bin.toString();
+        if (msg.getBinaryAttachment && msg.getBinaryAttachment()) {
+          xml = msg.getBinaryAttachment().toString();
         }
 
         if (!xml && msg.getXmlContent) {
@@ -79,8 +78,19 @@ function connectToSwim() {
           xml = msg.getTextAttachment();
         }
 
+        if (!xml && msg.getSdtContainer) {
+          const sdt = msg.getSdtContainer();
+          if (sdt) {
+            try {
+              xml = sdt.getXml();
+            } catch {
+              xml = JSON.stringify(sdt);
+            }
+          }
+        }
+
         if (!xml) {
-          console.warn("⚠️ Received SWIM message with no usable payload");
+          console.warn("⚠️ SWIM message received with no usable payload type.");
           return;
         }
 
@@ -90,10 +100,9 @@ function connectToSwim() {
         console.log("===========================================");
 
         const parsed = await parseStringPromise(xml, { explicitArray: true });
-
         console.log("PARSED ROOT KEYS:", Object.keys(parsed));
 
-        // Placeholder parser
+        // Placeholder parse (will refine after we see structure)
         const notam = parsed?.digitalNotam?.notam?.[0];
         if (!notam) return;
 
