@@ -38,7 +38,7 @@ async function fetchBaselineNotams() {
   try {
     console.log("🌐 Scraping baseline NOTAMs for KMGM...");
     const url =
-      "https://notams.aim.faa.gov/notamSearch/search?reportType=Raw&formatType=json&locations=KMGM";
+      "https://notams.aim.faa.gov/notamSearch/search?reportType=Raw&formatType=json&notamType=ALL&locations=KMGM";
 
     const res = await axios.get(url, {
       headers: {
@@ -64,7 +64,10 @@ async function fetchBaselineNotams() {
       });
       console.log(`✅ Loaded ${data.notams.length} baseline KMGM NOTAMs`);
     } else {
-      console.log("⚠️ FAA NOTAM Search returned no KMGM NOTAMs");
+      console.log(
+        "⚠️ FAA NOTAM Search returned no KMGM NOTAMs. Raw response:",
+        JSON.stringify(data).substring(0, 500)
+      );
     }
   } catch (err) {
     console.error("❌ Scraper failed to fetch baseline NOTAMs:", err.message);
@@ -106,7 +109,6 @@ function connectToSwim() {
 
     consumer.on(solclientjs.MessageConsumerEventName.MESSAGE, async (msg) => {
       try {
-        // ✅ Safe payload extraction
         let xml = null;
 
         if (msg.getBinaryAttachment && msg.getBinaryAttachment()) {
@@ -134,7 +136,6 @@ function connectToSwim() {
           return;
         }
 
-        // 🔍 Debug dump
         console.log("===== RAW NOTAM XML (first 500 chars) =====");
         console.log(xml.substring(0, 500));
         console.log("===========================================");
@@ -146,19 +147,15 @@ function connectToSwim() {
           .catch(() => {});
 
         const id = Date.now().toString();
-
-        // Extract ICAO (first 4-letter code)
         const icaoMatch = xml.match(/\b[A-Z]{4}\b/);
         const icao = icaoMatch ? icaoMatch[0] : "UNKNOWN";
 
-        // Strip XML tags → readable text
         const text = xml
           .replace(/<[^>]+>/g, " ")
           .replace(/\s+/g, " ")
           .trim()
           .substring(0, 800);
 
-        // ✅ Only store KMGM NOTAMs
         if (icao === "KMGM" || text.includes("KMGM")) {
           const startTime = new Date().toISOString();
           const endTime = new Date(
