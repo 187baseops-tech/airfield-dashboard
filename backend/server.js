@@ -45,7 +45,7 @@ function saveState() {
 }
 
 // ---- Slides / Annotations ----
-const SLIDES_DIR = path.join(process.cwd(), "backend/data/slides");
+const SLIDES_DIR = path.join(process.cwd(), "data/slides");
 const ANNOT_FILE = "./annotations.json";
 
 // ---- NOTAM Scraper ----
