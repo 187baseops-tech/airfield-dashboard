@@ -29,8 +29,8 @@ async function scrapeNotams(icao) {
     $("a[id^=notam-]").each((i, el) => {
       const text = $(el).text().trim();
 
-      // Only include ICAO NOTAMs
-      if (text.includes(icao)) {
+      // Accept NOTAMs containing KMGM or !MGM
+      if (text.includes("KMGM") || text.includes("!MGM")) {
         results.push({
           id: $(el).attr("id"),
           text: cleanNotamText(text),
@@ -40,6 +40,11 @@ async function scrapeNotams(icao) {
 
     if (results.length === 0) {
       console.warn(`⚠️ OurAirports returned no ${icao} NOTAMs (maybe clear airfield)`);
+    } else {
+      console.log(
+        "✅ Scraped NOTAMs sample:",
+        results.slice(0, 3).map((n) => n.text)
+      );
     }
 
     notams = results;
@@ -54,16 +59,16 @@ async function scrapeNotams(icao) {
 function cleanNotamText(raw) {
   let cleaned = raw;
 
-  // Strip "Montgomery Regional..." keep only (KMGM)
+  // Replace long airport name with just (KMGM)
   cleaned = cleaned.replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)");
 
-  // Remove "NOTAMN" or "NOTAMR" keywords
+  // Remove NOTAMN / NOTAMR keywords
   cleaned = cleaned.replace(/\bNOTAM[N,R]\b/g, "").trim();
 
-  // Strip leading "Q) ..." section
+  // Remove Q) section
   cleaned = cleaned.replace(/Q\)[\s\S]*?(?=A\))/g, "");
 
-  // Keep A), B), C), E), remove "CREATED" and "SOURCE"
+  // Keep A), B), C), E) but drop CREATED and SOURCE lines
   cleaned = cleaned
     .replace(/CREATED:.*$/gm, "")
     .replace(/SOURCE:.*$/gm, "")
@@ -87,5 +92,5 @@ app.get("/", (req, res) => {
 // --- Start server ---
 app.listen(PORT, () => {
   console.log(`🚀 Backend listening on port ${PORT}`);
-  scrapeNotams("KMGM"); // Fetch initial NOTAMs
+  scrapeNotams("KMGM"); // Initial fetch
 });
