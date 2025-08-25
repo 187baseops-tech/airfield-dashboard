@@ -34,7 +34,31 @@ solclientjs.SolclientFactory.init({
 });
 
 // ---------------------------------------
-// Scraper: Fetch baseline NOTAMs from OurAirports (cheerio + regex fallback)
+// Helper: clean NOTAM text
+// ---------------------------------------
+function cleanNotamText(raw) {
+  let text = raw;
+
+  // Remove Q) lines
+  text = text.replace(/Q\)[^\n]+/gi, "").trim();
+
+  // Strip any leading junk before the first "A)"
+  text = text.replace(/^.*?(?=A\))/s, "").trim();
+
+  // Remove CREATED: lines
+  text = text.replace(/CREATED:[^\n]+/gi, "").trim();
+
+  // Remove SOURCE: lines
+  text = text.replace(/SOURCE:[^\n]+/gi, "").trim();
+
+  // Collapse whitespace
+  text = text.replace(/\s+/g, " ").trim();
+
+  return text;
+}
+
+// ---------------------------------------
+// Scraper: Fetch baseline NOTAMs from OurAirports
 // ---------------------------------------
 async function fetchBaselineNotams() {
   try {
@@ -45,51 +69,50 @@ async function fetchBaselineNotams() {
 
     const res = await axios.get(url, {
       httpsAgent: agent,
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; AirfieldDashboard/1.0)",
-      },
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; AirfieldDashboard/1.0)" },
     });
 
     const html = res.data;
     const $ = cheerio.load(html);
 
-    // Match any div with "notam" in its class name
     let notamDivs = $("div[class*='notam'], div[class*='NOTAM']");
 
     if (notamDivs.length === 0) {
       console.warn("⚠️ Cheerio found no <div class='notam'> elements. Falling back to regex...");
 
-      // fallback: find plain text "NOTAM" lines
       const fallbackMatches = html.match(/NOTAM[\s\S]*?(?=<\/div>|<\/p>)/gi) || [];
-
       fallbackMatches.forEach((block, idx) => {
         const rawNotam = block.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-        if (rawNotam.length > 0) {
+        const cleaned = cleanNotamText(rawNotam);
+
+        if (cleaned.length > 0) {
           activeNotams.push({
             id: `BASE-${Date.now()}-${idx}`,
             icao: "KMGM",
-            text: rawNotam,
+            text: cleaned,
             startTime: new Date().toISOString(),
             endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
           });
         }
       });
 
-      console.log(`✅ Loaded ${fallbackMatches.length} baseline KMGM NOTAMs from fallback regex`);
+      console.log(`✅ Loaded ${activeNotams.length} baseline KMGM NOTAMs (regex fallback)`);
     } else {
       notamDivs.each((idx, el) => {
         const rawNotam = $(el).text().replace(/\s+/g, " ").trim();
-        if (rawNotam.length > 0) {
+        const cleaned = cleanNotamText(rawNotam);
+
+        if (cleaned.length > 0) {
           activeNotams.push({
             id: `BASE-${Date.now()}-${idx}`,
             icao: "KMGM",
-            text: rawNotam,
+            text: cleaned,
             startTime: new Date().toISOString(),
             endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
           });
         }
       });
-      console.log(`✅ Loaded ${notamDivs.length} baseline KMGM NOTAMs from OurAirports`);
+      console.log(`✅ Loaded ${activeNotams.length} baseline KMGM NOTAMs from OurAirports`);
     }
   } catch (err) {
     console.error("❌ OurAirports scraper failed:", err.message);
@@ -119,10 +142,7 @@ function connectToSwim() {
       flowStartState: true,
       transportWindowSize: 10,
       ackMode,
-      queueDescriptor: {
-        type: solclientjs.QueueType.QUEUE,
-        name: SWIM_QUEUE,
-      },
+      queueDescriptor: { type: solclientjs.QueueType.QUEUE, name: SWIM_QUEUE },
     });
 
     consumer.on(solclientjs.MessageConsumerEventName.UP, () => {
@@ -136,54 +156,29 @@ function connectToSwim() {
         if (msg.getBinaryAttachment && msg.getBinaryAttachment()) {
           xml = msg.getBinaryAttachment().toString();
         }
-        if (!xml && msg.getXmlContent) {
-          xml = msg.getXmlContent();
-        }
-        if (!xml && msg.getTextAttachment) {
-          xml = msg.getTextAttachment();
-        }
-        if (!xml && msg.getSdtContainer) {
-          const sdt = msg.getSdtContainer();
-          if (sdt) {
-            try {
-              xml = sdt.getXml();
-            } catch {
-              xml = JSON.stringify(sdt);
-            }
-          }
-        }
+        if (!xml && msg.getXmlContent) xml = msg.getXmlContent();
+        if (!xml && msg.getTextAttachment) xml = msg.getTextAttachment();
 
         if (!xml) {
-          console.warn("⚠️ SWIM message received with no usable payload type.");
+          console.warn("⚠️ SWIM message received with no usable payload.");
           return;
         }
 
-        console.log("===== RAW NOTAM XML (first 500 chars) =====");
-        console.log(xml.substring(0, 500));
-        console.log("===========================================");
-
-        await parseStringPromise(xml, { explicitArray: true })
-          .then((parsed) => {
-            console.log("PARSED ROOT KEYS:", Object.keys(parsed));
-          })
-          .catch(() => {});
+        await parseStringPromise(xml).catch(() => {});
 
         const id = Date.now().toString();
         const icaoMatch = xml.match(/\b[A-Z]{4}\b/);
         const icao = icaoMatch ? icaoMatch[0] : "UNKNOWN";
 
-        const text = xml
-          .replace(/<[^>]+>/g, " ")
-          .replace(/\s+/g, " ")
-          .trim()
-          .substring(0, 800);
+        const textRaw = xml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        const cleaned = cleanNotamText(textRaw);
 
-        if (icao === "KMGM" || text.includes("KMGM")) {
+        if (icao === "KMGM" || cleaned.includes("KMGM")) {
           const startTime = new Date().toISOString();
           const endTime = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
 
-          activeNotams.push({ id, icao, text, startTime, endTime });
-          console.log(`📨 Stored KMGM NOTAM:`, text.substring(0, 120));
+          activeNotams.push({ id, icao, text: cleaned, startTime, endTime });
+          console.log(`📨 Stored KMGM NOTAM:`, cleaned.substring(0, 120));
         } else {
           console.log(`ℹ️ Ignored non-KMGM NOTAM (ICAO=${icao})`);
         }
@@ -218,11 +213,6 @@ app.get("/api/notams", (req, res) => {
     (n) => n.icao === "KMGM" || n.text.includes("KMGM")
   );
 
-  results = results.map((n) => ({
-    ...n,
-    text: `${n.icao} — ${n.text || "NO TEXT AVAILABLE"}`,
-  }));
-
   res.json({ notams: results });
 });
 
@@ -235,11 +225,8 @@ app.get("/api/metar", async (req, res) => {
     const response = await axios.get(url);
     const data = response.data;
 
-    if (data && data[0]) {
-      res.json({ raw: data[0].rawOb || data[0].raw });
-    } else {
-      res.json({ raw: "" });
-    }
+    if (data && data[0]) res.json({ raw: data[0].rawOb || data[0].raw });
+    else res.json({ raw: "" });
   } catch (err) {
     console.error("METAR fetch error:", err.message);
     res.status(500).json({ error: "Failed to fetch METAR" });
@@ -255,11 +242,8 @@ app.get("/api/taf", async (req, res) => {
     const response = await axios.get(url);
     const data = response.data;
 
-    if (data && data[0]) {
-      res.json({ raw: data[0].rawTAF || data[0].raw });
-    } else {
-      res.json({ raw: "" });
-    }
+    if (data && data[0]) res.json({ raw: data[0].rawTAF || data[0].raw });
+    else res.json({ raw: "" });
   } catch (err) {
     console.error("TAF fetch error:", err.message);
     res.status(500).json({ error: "Failed to fetch TAF" });
