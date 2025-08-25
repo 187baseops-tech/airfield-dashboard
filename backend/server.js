@@ -153,6 +153,12 @@ app.get("/api/notams", (req, res) => {
     );
   }
 
+  // ✅ ensure "text" always exists
+  results = results.map(n => ({
+    ...n,
+    text: `${n.icao} — ${n.text || "NO TEXT AVAILABLE"}`
+  }));
+
   res.json({ notams: results });
 });
 
