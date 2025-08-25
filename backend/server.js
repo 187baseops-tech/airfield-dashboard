@@ -102,26 +102,27 @@ function connectToSwim() {
         const parsed = await parseStringPromise(xml, { explicitArray: true });
         console.log("PARSED ROOT KEYS:", Object.keys(parsed));
 
-        // Placeholder parse (will refine after we see structure)
-        const notam = parsed?.digitalNotam?.notam?.[0];
-        if (!notam) return;
+        // -------------------------------
+        // NEW: AIXM Regex Fallback Parser
+        // -------------------------------
+        const id = Date.now().toString();
 
-        const id = notam.$?.id || `NOTAM-${Date.now()}`;
-        const text = notam.text?.[0] || "UNKNOWN NOTAM";
-        const startTime = notam.startDateTime?.[0] || new Date().toISOString();
-        const endTime =
-          notam.endDateTime?.[0] ||
-          new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+        // Grab ICAO (first 4-letter code)
+        const icaoMatch = xml.match(/\b[A-Z]{4}\b/);
+        const icao = icaoMatch ? icaoMatch[0] : "UNKNOWN";
 
-        if (text.includes("KMGM")) {
-          activeNotams.push({
-            id,
-            text,
-            startTime,
-            endTime,
-          });
-          console.log("📨 Active NOTAM stored:", text);
-        }
+        // Strip XML tags → readable text
+        const text = xml.replace(/<[^>]+>/g, " ")
+                        .replace(/\s+/g, " ")
+                        .trim()
+                        .substring(0, 800); // keep it sane
+
+        const startTime = new Date().toISOString();
+        const endTime = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+
+        activeNotams.push({ id, icao, text, startTime, endTime });
+        console.log(`📨 Stored NOTAM for ${icao}:`, text.substring(0, 120));
+
       } catch (err) {
         console.error("NOTAM parse error:", err);
       }
@@ -148,7 +149,7 @@ app.get("/api/notams", (req, res) => {
 
   if (icao) {
     results = activeNotams.filter(n =>
-      n.text.includes(icao.toUpperCase())
+      n.icao.includes(icao.toUpperCase())
     );
   }
 
