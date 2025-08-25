@@ -61,7 +61,6 @@ function flightCat(ceiling, vis) {
   return "VFR";
 }
 
-// --- FITS Calculation ---
 function computeFits(tempC, dewC) {
   const tempF = (tempC * 9) / 5 + 32;
   const dewF = (dewC * 9) / 5 + 32;
@@ -325,33 +324,18 @@ export default function Dashboard() {
   const [rsc, setRsc] = useState("DRY");
   const [rscNotes, setRscNotes] = useState("");
   const [barriers, setBarriers] = useState({ east: "DOWN", west: "DOWN" });
-  const [navaids, setNavaids] = useState({
-    ils10: true,
-    ils28: true,
-    mgm: true,
-    mxf: true,
-  });
+  const [navaids, setNavaids] = useState({});
   const [arff, setArff] = useState("GREEN");
-
-  // --- BASH Forecast ---
-  const [bash, setBash] = useState({
-    KMGM: "LOW",
-    KMXF: "LOW",
-    "PH/CR MOA": "LOW",
-    "BHM MOA": "LOW",
-    "Shelby Range": "LOW",
-    "VR-060": "LOW",
-    "VR-1056": "LOW",
-  });
+  const [bash, setBash] = useState({ NORTH: "LOW", SOUTH: "LOW" });
 
   const API = process.env.REACT_APP_API_URL;
 
+  // --- Fetch METAR/TAF/NOTAMs ---
   async function fetchData() {
     try {
       const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
       const t = await axios.get(`${API}/api/taf?icao=${ICAO}`);
       const n = await axios.get(`${API}/api/notams?icao=${ICAO}`);
-
       setMetar(m.data.rawOb || m.data.raw || "");
       setTaf(t.data.rawTAF || t.data.raw || "");
       setNotams(n.data?.notams || []);
@@ -361,12 +345,27 @@ export default function Dashboard() {
     }
   }
 
+  // --- Fetch NAVAIDs (auto synced from backend) ---
+  async function fetchNavaids() {
+    try {
+      const res = await axios.get(`${API}/api/navaids`);
+      setNavaids(res.data);
+    } catch (err) {
+      console.error("Failed to fetch NAVAIDs:", err.message);
+    }
+  }
+
   useEffect(() => {
     fetchData();
-    const timer = setInterval(fetchData, 300000); // refresh every 5 min
+    fetchNavaids();
+    const timer = setInterval(() => {
+      fetchData();
+      fetchNavaids();
+    }, 300000); // every 5 min
     return () => clearInterval(timer);
   }, []);
 
+  // --- Process METAR/TAF ---
   useEffect(() => {
     const p = parseMetar(metar);
     setParsed(p);
@@ -378,7 +377,6 @@ export default function Dashboard() {
         : 99999;
     setCat(flightCat(ceilFt, visMiles));
 
-    // --- FITS (WBGT) ---
     const tempMatch = p.tempdew?.match(/(M?\d{2})\/(M?\d{2})/);
     if (tempMatch) {
       const tC = parseInt(tempMatch[1].replace("M", "-"));
@@ -386,10 +384,7 @@ export default function Dashboard() {
       setFits(computeFits(tC, tdC));
     }
 
-    // --- ALT REQ Logic ---
     let altNeeded = false;
-
-    // METAR check
     if (
       p.ceiling &&
       /^(BKN|OVC)\d{3}/.test(p.ceiling) &&
@@ -398,9 +393,6 @@ export default function Dashboard() {
     ) {
       altNeeded = true;
     }
-
-    // TODO: add TAF-based alternate logic here (if needed)
-
     setAltReq(altNeeded);
   }, [metar, taf]);
 
@@ -419,13 +411,17 @@ export default function Dashboard() {
             Last Updated: {lastUpdate.toLocaleString()}
           </p>
           <button
-            onClick={fetchData}
+            onClick={() => {
+              fetchData();
+              fetchNavaids();
+            }}
             className="mt-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded"
           >
             🔄 Refresh
           </button>
         </div>
       </header>
+
       {/* First Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
         {/* Airfield Status */}
@@ -437,7 +433,9 @@ export default function Dashboard() {
             <p className="font-semibold">Active Runway</p>
             <button
               className="px-3 py-1 rounded bg-green-600"
-              onClick={() => setActiveRunway(activeRunway === "10" ? "28" : "10")}
+              onClick={() =>
+                setActiveRunway(activeRunway === "10" ? "28" : "10")
+              }
             >
               {activeRunway}
             </button>
@@ -456,7 +454,13 @@ export default function Dashboard() {
                     : "bg-slate-700"
                 }`}
                 onClick={() =>
-                  setRsc(rsc === "DRY" ? "WET" : rsc === "WET" ? "N/A" : "DRY")
+                  setRsc(
+                    rsc === "DRY"
+                      ? "WET"
+                      : rsc === "WET"
+                      ? "N/A"
+                      : "DRY"
+                  )
                 }
               >
                 {rsc}
@@ -501,26 +505,23 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* NAVAIDs */}
+          {/* NAVAIDs (Auto Synced) */}
           <div className="mb-2">
             <p className="font-semibold">NAVAIDs</p>
             <div className="flex gap-2 flex-wrap">
               {Object.keys(navaids).map((n) => (
-                <button
+                <div
                   key={n}
                   className={`px-2 py-1 rounded ${
                     navaids[n] ? "bg-green-600" : "bg-red-600"
                   }`}
-                  onClick={() =>
-                    setNavaids((prev) => ({ ...prev, [n]: !prev[n] }))
-                  }
                 >
                   {n === "mgm"
                     ? "MGM TACAN"
                     : n === "mxf"
                     ? "MXF TACAN"
                     : n.toUpperCase()}
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -624,45 +625,20 @@ export default function Dashboard() {
         </section>
 
         {/* NOTAMs */}
-        <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
-          <h2 className="text-lg font-bold underline mb-2">KMGM NOTAMs</h2>
-          {notams.length > 0 ? (
-            <ul className="space-y-2 text-sm flex-1 overflow-y-auto">
-              {notams.map((n) => {
-                const isExpanded = expandedNotams[n.id];
-                const firstLine = n.text.split("\n")[0];
-                return (
-                  <li
-                    key={n.id}
-                    className="p-2 rounded border border-slate-700 bg-slate-900"
-                  >
-                    <span
-                      className="font-mono whitespace-pre-wrap"
-                      dangerouslySetInnerHTML={{
-                        __html: isExpanded ? n.text : firstLine,
-                      }}
-                    />
-                    {n.text.includes("\n") && (
-                      <button
-                        onClick={() =>
-                          setExpandedNotams((prev) => ({
-                            ...prev,
-                            [n.id]: !prev[n.id],
-                          }))
-                        }
-                        className="mt-1 text-xs text-blue-400 underline"
-                      >
-                        {isExpanded ? "Show Less" : "Show More"}
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="text-sm text-slate-400">No NOTAMs available.</p>
-          )}
-        </section>
+<section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
+  <h2 className="text-lg font-bold underline mb-2">KMGM NOTAMs</h2>
+  {notams.length > 0 ? (
+    <ul className="space-y-2 text-sm flex-1 overflow-y-auto">
+      {notams.map((n) => (
+        <li key={n.id} className="p-2 rounded border border-slate-700 bg-slate-900">
+          <pre className="font-mono whitespace-pre-wrap">{n.text}</pre>
+        </li>
+      ))}
+    </ul>
+  ) : (
+    <p className="text-sm text-slate-400">No NOTAMs available.</p>
+  )}
+</section>
       </div>
 
       {/* Second Row */}
