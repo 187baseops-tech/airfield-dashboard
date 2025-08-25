@@ -10,9 +10,6 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// -------------------
-// Active NOTAM storage
-// -------------------
 let activeNotams = [];
 
 // Cleanup expired NOTAMs every 5 min
@@ -22,9 +19,6 @@ setInterval(() => {
   console.log("🧹 Cleaned expired NOTAMs, remaining:", activeNotams.length);
 }, 5 * 60 * 1000);
 
-// -------------------
-// FAA SWIM Connection
-// -------------------
 const {
   SOLACE_HOST,
   SOLACE_VPN,
@@ -48,7 +42,6 @@ function connectToSwim() {
   session.on(solclientjs.SessionEventCode.UP_NOTICE, () => {
     console.log("✅ Connected to FAA SWIM NOTAM feed");
 
-    // ✅ Defensive ackMode resolution
     const ackMode =
       solclientjs.MessageConsumerAcknowledgementMode?.CLIENT ||
       solclientjs.MessageConsumerAckMode?.CLIENT ||
@@ -70,19 +63,37 @@ function connectToSwim() {
 
     consumer.on(solclientjs.MessageConsumerEventName.MESSAGE, async msg => {
       try {
-        const xml = msg.getBinaryAttachment().toString();
+        // ✅ Safe payload handling
+        let xml = null;
 
-        // 🔍 DEBUG STEP 1: Show raw incoming XML
+        if (msg.getBinaryAttachment) {
+          const bin = msg.getBinaryAttachment();
+          if (bin) xml = bin.toString();
+        }
+
+        if (!xml && msg.getXmlContent) {
+          xml = msg.getXmlContent();
+        }
+
+        if (!xml && msg.getTextAttachment) {
+          xml = msg.getTextAttachment();
+        }
+
+        if (!xml) {
+          console.warn("⚠️ Received SWIM message with no usable payload");
+          return;
+        }
+
+        // 🔍 Debug dump
         console.log("===== RAW NOTAM XML (first 500 chars) =====");
         console.log(xml.substring(0, 500));
         console.log("===========================================");
 
         const parsed = await parseStringPromise(xml, { explicitArray: true });
 
-        // 🔍 DEBUG: top-level keys
         console.log("PARSED ROOT KEYS:", Object.keys(parsed));
 
-        // Current placeholder parsing
+        // Placeholder parser
         const notam = parsed?.digitalNotam?.notam?.[0];
         if (!notam) return;
 
@@ -175,9 +186,6 @@ app.get("/api/taf", async (req, res) => {
   }
 });
 
-// -------------------
-// Start server
-// -------------------
 app.listen(PORT, () => {
   console.log(`🚀 Backend listening on port ${PORT}`);
 });
