@@ -32,33 +32,42 @@ solclientjs.SolclientFactory.init({
 });
 
 // ---------------------------------------
-// Fetch baseline NOTAMs from AWC API
+// Scraper: Fetch baseline NOTAMs from FAA NOTAM Search
 // ---------------------------------------
 async function fetchBaselineNotams() {
   try {
-    console.log("🌐 Fetching baseline NOTAMs for KMGM...");
-    const url = "https://aviationweather.gov/api/data/notams?ids=KMGM&format=json";
+    console.log("🌐 Scraping baseline NOTAMs for KMGM...");
+    const url =
+      "https://notams.aim.faa.gov/notamSearch/search?reportType=Raw&formatType=json&locations=KMGM";
+
     const res = await axios.get(url, {
-      headers: { "User-Agent": "AirfieldDashboard/1.0" }
+      headers: {
+        "Accept": "application/json",
+        "Referer": "https://notams.aim.faa.gov/notamSearch/",
+        "User-Agent": "Mozilla/5.0 (compatible; AirfieldDashboard/1.0)",
+      },
     });
+
     const data = res.data;
 
-    if (Array.isArray(data)) {
-      data.forEach(n => {
+    if (data && Array.isArray(data.notams)) {
+      data.notams.forEach((n) => {
         activeNotams.push({
-          id: n.id || `BASE-${Date.now()}`,
+          id: n.notamNumber || `BASE-${Date.now()}`,
           icao: "KMGM",
-          text: n.raw || "NO TEXT AVAILABLE",
-          startTime: n.startdate || new Date().toISOString(),
-          endTime: n.enddate || new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          text: n.notam || n.raw || "NO TEXT AVAILABLE",
+          startTime: n.startDate || new Date().toISOString(),
+          endTime:
+            n.endDate ||
+            new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
         });
       });
-      console.log(`✅ Loaded ${data.length} baseline KMGM NOTAMs`);
+      console.log(`✅ Loaded ${data.notams.length} baseline KMGM NOTAMs`);
     } else {
-      console.log("⚠️ No baseline NOTAMs found in FAA AWC API response");
+      console.log("⚠️ FAA NOTAM Search returned no KMGM NOTAMs");
     }
   } catch (err) {
-    console.error("❌ Failed to fetch baseline NOTAMs:", err.message);
+    console.error("❌ Scraper failed to fetch baseline NOTAMs:", err.message);
   }
 }
 
