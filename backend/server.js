@@ -1,98 +1,184 @@
+// backend/server.js
+
+import "dotenv/config"; // Load .env file
 import express from "express";
-import fs from "fs";
-import path from "path";
-import multer from "multer";
-import cors from "cors";
-import axios from "axios";
+import { WebSocketServer } from "ws";
+import solace from "solclientjs";
+import { TextDecoder } from "util";
+import xml2js from "xml2js";
 
+// ----------------- DEBUG ENV -----------------
+console.log("DEBUG ENV:", {
+  SOLACE_HOST: process.env.SOLACE_HOST,
+  SOLACE_VPN: process.env.SOLACE_VPN,
+  SOLACE_USERNAME: process.env.SOLACE_USERNAME,
+  SOLACE_PASSWORD: process.env.SOLACE_PASSWORD ? "***hidden***" : undefined,
+  SWIM_QUEUE: process.env.SWIM_QUEUE,
+});
+
+// ----------------- Express Setup -----------------
 const app = express();
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 5000;
 
-// Enable CORS
-app.use(cors());
-
-// Paths
-const dataDir = path.join(process.cwd(), "data");
-const slidesDir = path.join(dataDir, "slides");
-const annotsFile = path.join(dataDir, "annotations.json");
-
-// Ensure directories exist
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
-if (!fs.existsSync(slidesDir)) fs.mkdirSync(slidesDir);
-if (!fs.existsSync(annotsFile))
-  fs.writeFileSync(annotsFile, JSON.stringify({ slides: {} }, null, 2));
-
-app.use(express.json());
-app.use("/slides", express.static(slidesDir)); // serve slide images
-
-// ---- Annotations API ----
-app.get("/api/annotations", (req, res) => {
-  const data = JSON.parse(fs.readFileSync(annotsFile, "utf8"));
-  res.json(data);
+app.get("/", (req, res) => {
+  res.send("✅ FAA SWIM NOTAM Backend is running...");
 });
 
-app.post("/api/annotations", (req, res) => {
-  fs.writeFileSync(annotsFile, JSON.stringify(req.body, null, 2));
-  res.json({ status: "ok" });
+const server = app.listen(PORT, () => {
+  console.log(`🚀 Backend listening on port ${PORT}`);
 });
 
-// ---- Slides API ----
-app.get("/api/slides", (req, res) => {
-  const files = fs.readdirSync(slidesDir).filter(f => /\.(png|jpg|jpeg)$/i.test(f));
-  res.json(files); // return just filenames
+// ----------------- WebSocket Setup -----------------
+const wss = new WebSocketServer({ server });
+let dashboardClients = [];
+
+// In-memory store for active KMGM NOTAMs
+// Map: NOTAM ID → { text, endTime }
+const activeNotams = new Map();
+
+wss.on("connection", (ws) => {
+  console.log("📡 Frontend client connected");
+  dashboardClients.push(ws);
+
+  // Send current active NOTAMs immediately
+  ws.send(
+    JSON.stringify({
+      type: "NOTAM_LIST",
+      data: Array.from(activeNotams.values()).map((n) => n.text),
+    })
+  );
+
+  ws.on("close", () => {
+    console.log("❌ Client disconnected");
+    dashboardClients = dashboardClients.filter((client) => client !== ws);
+  });
 });
 
-const upload = multer({ dest: slidesDir });
-app.post("/api/slides", upload.single("slide"), (req, res) => {
-  const tempPath = req.file.path;
-  const targetPath = path.join(slidesDir, req.file.originalname);
+function broadcastToDashboard(message) {
+  dashboardClients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(JSON.stringify(message));
+    }
+  });
+}
 
-  fs.renameSync(tempPath, targetPath);
-  res.json({ status: "uploaded", file: req.file.originalname });
-});
+// ----------------- Solace (FAA SWIM Queue) -----------------
+const factoryProps = new solace.SolclientFactoryProperties();
+factoryProps.profile = solace.SolclientFactoryProfiles.version10;
+solace.SolclientFactory.init(factoryProps);
 
-// ---- Weather APIs ----
-// METAR
-app.get("/api/metar", async (req, res) => {
+const sessionProps = {
+  url: process.env.SOLACE_HOST,
+  vpnName: process.env.SOLACE_VPN,
+  userName: process.env.SOLACE_USERNAME,
+  password: process.env.SOLACE_PASSWORD,
+};
+
+let session;
+let messageConsumer;
+
+function connectToSwim() {
+  session = solace.SolclientFactory.createSession(sessionProps);
+
+  session.on(solace.SessionEventCode.UP_NOTICE, () => {
+    console.log("✅ Connected to FAA SWIM NOTAM feed");
+    startQueueConsumer();
+  });
+
+  session.on(solace.SessionEventCode.CONNECT_FAILED_ERROR, (err) => {
+    console.error("❌ Connection failed:", err);
+  });
+
+  session.on(solace.SessionEventCode.DISCONNECTED, () => {
+    console.warn("⚠️ Disconnected from FAA SWIM, retrying in 10s...");
+    setTimeout(connectToSwim, 10000);
+  });
+
   try {
-    const { icao } = req.query;
-    const url = `https://aviationweather.gov/api/data/metar?ids=${icao}&format=json`;
-    const { data } = await axios.get(url);
-    res.json(data[0] || {}); // return first station result
+    session.connect();
   } catch (err) {
-    console.error("METAR fetch error:", err.message);
-    res.status(500).json({ error: "Failed to fetch METAR" });
+    console.error("❌ Error connecting to FAA SWIM:", err);
   }
-});
+}
 
-// TAF
-app.get("/api/taf", async (req, res) => {
+function startQueueConsumer() {
   try {
-    const { icao } = req.query;
-    const url = `https://aviationweather.gov/api/data/taf?ids=${icao}&format=json`;
-    const { data } = await axios.get(url);
-    res.json(data[0] || {});
+    messageConsumer = session.createMessageConsumer({
+      queueDescriptor: {
+        name: process.env.SWIM_QUEUE,
+        type: solace.QueueType.QUEUE,
+      },
+      acknowledgeMode: solace.MessageConsumerAcknowledgeMode.AUTO,
+    });
+
+    messageConsumer.on(solace.MessageConsumerEventName.UP, () => {
+      console.log("📡 MessageConsumer is UP and bound to queue.");
+    });
+
+    messageConsumer.on(solace.MessageConsumerEventName.MESSAGE, async (message) => {
+      try {
+        // Decode XML
+        let xml = "";
+        if (message.getBinaryAttachment()) {
+          const decoder = new TextDecoder("utf-8");
+          xml = decoder.decode(message.getBinaryAttachment());
+        }
+        if (!xml) return;
+
+        // Parse XML → JSON
+        const parser = new xml2js.Parser({ explicitArray: false });
+        const json = await parser.parseStringPromise(xml);
+
+        const record = json?.notamRecord || {};
+        const notam = record?.notam || {};
+
+        // Extract key fields
+        const id = notam?.notamId || "UNKNOWN/00";
+        const location = notam?.location || "";
+        const textField = notam?.notamText || "";
+        const startTime = notam?.effectiveStart || "";
+        const endTime = notam?.effectiveEnd || "";
+        const created = notam?.created || "";
+        const status = notam?.notamStatus || "ACTIVE";
+
+        // Only KMGM + ACTIVE
+        if (location === "KMGM" && status === "ACTIVE") {
+          const formattedNotam = `${id} - ${textField} ${startTime ? startTime : ""} ${
+            endTime ? "UNTIL " + endTime : ""
+          }. CREATED: ${created}`;
+
+          // Store with expiry
+          activeNotams.set(id, { text: formattedNotam, endTime });
+          console.log("✅ Active KMGM NOTAM stored:", formattedNotam);
+
+          // Push to dashboard
+          broadcastToDashboard({ type: "NOTAM_UPDATE", data: formattedNotam });
+        }
+      } catch (err) {
+        console.error("⚠️ Error parsing NOTAM:", err);
+      }
+    });
+
+    messageConsumer.connect();
   } catch (err) {
-    console.error("TAF fetch error:", err.message);
-    res.status(500).json({ error: "Failed to fetch TAF" });
+    console.error("❌ Error starting MessageConsumer:", err);
   }
-});
+}
 
-// NOTAMs (using NOAA aviationweather.gov)
-app.get("/api/notams", async (req, res) => {
-  try {
-    const { icao } = req.query;
-    const url = `https://aviationweather.gov/api/data/notam?ids=${icao}&format=json`;
-    const { data } = await axios.get(url, { timeout: 10000 });
-
-    res.json({ notams: data || [] });
-  } catch (err) {
-    console.error("NOTAM fetch error:", err.message);
-    res.status(500).json({ error: "Failed to fetch NOTAMs" });
+// ----------------- Auto Cleanup for Expired NOTAMs -----------------
+setInterval(() => {
+  const now = new Date();
+  for (const [id, notam] of activeNotams.entries()) {
+    if (notam.endTime) {
+      const expiry = new Date(notam.endTime);
+      if (!isNaN(expiry.getTime()) && expiry < now) {
+        activeNotams.delete(id);
+        console.log(`⏰ NOTAM expired & removed: ${id}`);
+        broadcastToDashboard({ type: "NOTAM_REMOVE", data: id });
+      }
+    }
   }
-});
+}, 5 * 60 * 1000); // every 5 minutes
 
-
-
-// ---- Start Server ----
-app.listen(PORT, () => console.log(`✅ Backend running on port ${PORT}`));
+// Start FAA connection
+connectToSwim();
