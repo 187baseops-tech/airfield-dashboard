@@ -32,26 +32,31 @@ solclientjs.SolclientFactory.init({
 });
 
 // ---------------------------------------
-// Fetch baseline NOTAMs from FAA API
+// Fetch baseline NOTAMs from FAA NOTAM API
 // ---------------------------------------
 async function fetchBaselineNotams() {
   try {
     console.log("🌐 Fetching baseline NOTAMs for KMGM...");
-    const url = "https://aviationweather.gov/api/data/notams?ids=KMGM&format=json";
-    const res = await axios.get(url);
+    const url =
+      "https://notams.aim.faa.gov/notamSearch/search?reportType=Raw&formatType=json&locations=KMGM";
+    const res = await axios.get(url, {
+      headers: { "User-Agent": "AirfieldDashboard/1.0" },
+    });
     const data = res.data;
 
-    if (Array.isArray(data)) {
-      data.forEach(n => {
+    if (data && Array.isArray(data.notams)) {
+      data.notams.forEach((n) => {
         activeNotams.push({
-          id: n.id || `BASE-${Date.now()}`,
+          id: n.notamNumber || `BASE-${Date.now()}`,
           icao: "KMGM",
-          text: n.raw || n.text || "NO TEXT AVAILABLE",
-          startTime: n.startdate || new Date().toISOString(),
-          endTime: n.enddate || new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          text: n.notam || n.raw || "NO TEXT AVAILABLE",
+          startTime: n.startDate || new Date().toISOString(),
+          endTime:
+            n.endDate ||
+            new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
         });
       });
-      console.log(`✅ Loaded ${data.length} baseline KMGM NOTAMs`);
+      console.log(`✅ Loaded ${data.notams.length} baseline KMGM NOTAMs`);
     } else {
       console.log("⚠️ No baseline NOTAMs found in FAA API response");
     }
@@ -93,7 +98,7 @@ function connectToSwim() {
       console.log("📡 MessageConsumer is UP and bound to queue.");
     });
 
-    consumer.on(solclientjs.MessageConsumerEventName.MESSAGE, async msg => {
+    consumer.on(solclientjs.MessageConsumerEventName.MESSAGE, async (msg) => {
       try {
         // ✅ Safe payload extraction
         let xml = null;
@@ -129,7 +134,7 @@ function connectToSwim() {
         console.log("===========================================");
 
         await parseStringPromise(xml, { explicitArray: true })
-          .then(parsed => {
+          .then((parsed) => {
             console.log("PARSED ROOT KEYS:", Object.keys(parsed));
           })
           .catch(() => {});
@@ -144,15 +149,18 @@ function connectToSwim() {
         const icao = icaoMatch ? icaoMatch[0] : "UNKNOWN";
 
         // Strip XML tags → readable text
-        const text = xml.replace(/<[^>]+>/g, " ")
-                        .replace(/\s+/g, " ")
-                        .trim()
-                        .substring(0, 800);
+        const text = xml
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim()
+          .substring(0, 800);
 
         // ✅ Only store KMGM NOTAMs
         if (icao === "KMGM" || text.includes("KMGM")) {
           const startTime = new Date().toISOString();
-          const endTime = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+          const endTime = new Date(
+            Date.now() + 24 * 3600 * 1000
+          ).toISOString();
 
           activeNotams.push({ id, icao, text, startTime, endTime });
           console.log(`📨 Stored KMGM NOTAM:`, text.substring(0, 120));
@@ -167,7 +175,7 @@ function connectToSwim() {
     consumer.connect();
   });
 
-  session.on(solclientjs.SessionEventCode.CONNECT_FAILED_ERROR, err => {
+  session.on(solclientjs.SessionEventCode.CONNECT_FAILED_ERROR, (err) => {
     console.error("❌ SWIM connection failed:", err);
   });
 
@@ -187,11 +195,13 @@ function connectToSwim() {
 // -------------------
 app.get("/api/notams", (req, res) => {
   // ✅ Only return KMGM NOTAMs
-  let results = activeNotams.filter(n => n.icao === "KMGM" || n.text.includes("KMGM"));
+  let results = activeNotams.filter(
+    (n) => n.icao === "KMGM" || n.text.includes("KMGM")
+  );
 
-  results = results.map(n => ({
+  results = results.map((n) => ({
     ...n,
-    text: `${n.icao} — ${n.text || "NO TEXT AVAILABLE"}`
+    text: `${n.icao} — ${n.text || "NO TEXT AVAILABLE"}`,
   }));
 
   res.json({ notams: results });
