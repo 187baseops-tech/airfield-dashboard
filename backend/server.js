@@ -1,4 +1,3 @@
-// server.js
 import express from "express";
 import cors from "cors";
 import axios from "axios";
@@ -8,7 +7,6 @@ import { parseStringPromise } from "xml2js";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Enable CORS
 app.use(cors());
 app.use(express.json());
 
@@ -50,7 +48,6 @@ function connectToSwim() {
   session.on(solclientjs.SessionEventCode.UP_NOTICE, () => {
     console.log("✅ Connected to FAA SWIM NOTAM feed");
 
-    // Create flow bound to the NOTAM queue
     const flowProps = new solclientjs.FlowProperties();
     flowProps.flowStartState = true;
     flowProps.transportWindowSize = 10;
@@ -70,27 +67,33 @@ function connectToSwim() {
         const xml = msg.getBinaryAttachment().toString();
         const parsed = await parseStringPromise(xml);
 
-        // Drill down to NOTAM text
         const notam = parsed?.digitalNotam?.notam?.[0];
         if (!notam) return;
 
         const id = notam.$?.id || `NOTAM-${Date.now()}`;
         const text = notam.text?.[0] || "UNKNOWN NOTAM";
 
-        // Extract start/end times if available
-        const startTime = notam.startDateTime?.[0] || new Date().toISOString();
-        const endTime = notam.endDateTime?.[0] || new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+        const location = notam.location?.[0] || "";
+        const account = notam.account?.[0] || "";
 
-        // Only include KMGM + active NOTAMs
-        if (text.includes("KMGM")) {
-          activeNotams.push({
-            id,
-            text,
-            startTime,
-            endTime,
-          });
-          console.log("📨 Active NOTAM stored:", text);
-        }
+        const startTime =
+          notam.startDateTime?.[0] || new Date().toISOString();
+        const endTime =
+          notam.endDateTime?.[0] ||
+          new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+
+        // Store with normalized ICAO
+        const icao = (location || account || text).match(/[A-Z]{4}/)?.[0] || "UNKNOWN";
+
+        activeNotams.push({
+          id,
+          text,
+          startTime,
+          endTime,
+          icao,
+        });
+
+        console.log(`📨 NOTAM stored for ${icao}:`, text.split("\n")[0]);
 
       } catch (err) {
         console.error("NOTAM parse error:", err);
@@ -112,13 +115,17 @@ connectToSwim();
 // -------------------
 // API Endpoints
 // -------------------
-
-// NOTAMs
 app.get("/api/notams", (req, res) => {
-  res.json({ notams: activeNotams });
+  const { icao } = req.query;
+  let results = activeNotams;
+
+  if (icao) {
+    results = activeNotams.filter(n => n.icao === icao.toUpperCase());
+  }
+
+  res.json({ notams: results });
 });
 
-// METAR
 app.get("/api/metar", async (req, res) => {
   const { icao } = req.query;
   if (!icao) return res.status(400).json({ error: "Missing ICAO code" });
@@ -139,7 +146,6 @@ app.get("/api/metar", async (req, res) => {
   }
 });
 
-// TAF
 app.get("/api/taf", async (req, res) => {
   const { icao } = req.query;
   if (!icao) return res.status(400).json({ error: "Missing ICAO code" });
