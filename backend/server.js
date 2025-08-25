@@ -99,15 +99,18 @@ function connectToSwim() {
         console.log(xml.substring(0, 500));
         console.log("===========================================");
 
-        const parsed = await parseStringPromise(xml, { explicitArray: true });
-        console.log("PARSED ROOT KEYS:", Object.keys(parsed));
+        await parseStringPromise(xml, { explicitArray: true })
+          .then(parsed => {
+            console.log("PARSED ROOT KEYS:", Object.keys(parsed));
+          })
+          .catch(() => {});
 
         // -------------------------------
-        // NEW: AIXM Regex Fallback Parser
+        // AIXM Regex Fallback Parser
         // -------------------------------
         const id = Date.now().toString();
 
-        // Grab ICAO (first 4-letter code)
+        // Extract ICAO (first 4-letter code)
         const icaoMatch = xml.match(/\b[A-Z]{4}\b/);
         const icao = icaoMatch ? icaoMatch[0] : "UNKNOWN";
 
@@ -115,14 +118,18 @@ function connectToSwim() {
         const text = xml.replace(/<[^>]+>/g, " ")
                         .replace(/\s+/g, " ")
                         .trim()
-                        .substring(0, 800); // keep it sane
+                        .substring(0, 800);
 
-        const startTime = new Date().toISOString();
-        const endTime = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+        // ✅ Only store KMGM NOTAMs
+        if (icao === "KMGM" || text.includes("KMGM")) {
+          const startTime = new Date().toISOString();
+          const endTime = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
 
-        activeNotams.push({ id, icao, text, startTime, endTime });
-        console.log(`📨 Stored NOTAM for ${icao}:`, text.substring(0, 120));
-
+          activeNotams.push({ id, icao, text, startTime, endTime });
+          console.log(`📨 Stored KMGM NOTAM:`, text.substring(0, 120));
+        } else {
+          console.log(`ℹ️ Ignored non-KMGM NOTAM (ICAO=${icao})`);
+        }
       } catch (err) {
         console.error("NOTAM parse error:", err);
       }
@@ -144,16 +151,9 @@ connectToSwim();
 // API Endpoints
 // -------------------
 app.get("/api/notams", (req, res) => {
-  const { icao } = req.query;
-  let results = activeNotams;
+  // ✅ Only return KMGM NOTAMs
+  let results = activeNotams.filter(n => n.icao === "KMGM" || n.text.includes("KMGM"));
 
-  if (icao) {
-    results = activeNotams.filter(n =>
-      n.icao.includes(icao.toUpperCase())
-    );
-  }
-
-  // ✅ ensure "text" always exists
   results = results.map(n => ({
     ...n,
     text: `${n.icao} — ${n.text || "NO TEXT AVAILABLE"}`
