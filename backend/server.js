@@ -1,76 +1,91 @@
+// server.js
 import express from "express";
 import axios from "axios";
 import * as cheerio from "cheerio";
-import cors from "cors";
+import https from "https";
 
 const app = express();
-app.use(cors());
-app.use(express.json());
-
 const PORT = process.env.PORT || 10000;
 
-// ===== NOTAM SCRAPER (OurAirports) =====
+// --- In-memory store ---
+let notams = [];
+
+// --- Helper: scrape NOTAMs from OurAirports ---
 async function scrapeNotams(icao) {
   try {
     console.log(`🌐 Scraping NOTAMs for ${icao} from OurAirports...`);
-    const url = `https://ourairports.com/airports/${icao}/notams.html`;
-    const { data: html } = await axios.get(url, { timeout: 15000 });
+
+    // Per-request agent (ignores cert errors only for this request)
+    const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+    const { data: html } = await axios.get(
+      `https://ourairports.com/airports/${icao}/notams.html`,
+      { httpsAgent }
+    );
+
     const $ = cheerio.load(html);
 
-    const notams = [];
+    const results = [];
+    $("a[id^=notam-]").each((i, el) => {
+      const text = $(el).text().trim();
 
-    $("a[id^='notam-']").each((i, el) => {
-      let text = $(el).text().trim();
-
-      // Remove long "Montgomery Regional ..." names → leave (KMGM)
-      text = text.replace(/Montgomery Regional \(Dannelly Field\) Airport\s*/gi, "").trim();
-
-      // Hide NOTAMN/NOTAMR markers
-      text = text.replace(/\sNOTAM[N|R]\s?/g, " ");
-
-      // Cleanup spacing
-      text = text.replace(/\s+/g, " ");
-
-      // Keep ID (M0086/25, 08/030, etc.)
-      const idMatch = text.match(/(M\d{4}\/\d{2}|\d{2}\/\d{3,4})/);
-      const id = idMatch ? idMatch[0] : `notam-${i}`;
-
-      notams.push({
-        id,
-        text,
-      });
+      // Only include ICAO NOTAMs
+      if (text.includes(icao)) {
+        results.push({
+          id: $(el).attr("id"),
+          text: cleanNotamText(text),
+        });
+      }
     });
 
-    // Sort: closures, outages, then everything else
-    notams.sort((a, b) => {
-      const crit = (txt) =>
-        /(CLSD|CLOSED|U\/S|UNSERVICEABLE|OUT OF SERVICE)/i.test(txt) ? 0 : 1;
-      return crit(a.text) - crit(b.text);
-    });
+    if (results.length === 0) {
+      console.warn(`⚠️ OurAirports returned no ${icao} NOTAMs (maybe clear airfield)`);
+    }
 
-    console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
-    return notams;
+    notams = results;
+    return results;
   } catch (err) {
     console.error(`❌ OurAirports scraper failed: ${err.message}`);
     return [];
   }
 }
 
-// ===== API ROUTES =====
+// --- Clean up raw NOTAM text ---
+function cleanNotamText(raw) {
+  let cleaned = raw;
+
+  // Strip "Montgomery Regional..." keep only (KMGM)
+  cleaned = cleaned.replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)");
+
+  // Remove "NOTAMN" or "NOTAMR" keywords
+  cleaned = cleaned.replace(/\bNOTAM[N,R]\b/g, "").trim();
+
+  // Strip leading "Q) ..." section
+  cleaned = cleaned.replace(/Q\)[\s\S]*?(?=A\))/g, "");
+
+  // Keep A), B), C), E), remove "CREATED" and "SOURCE"
+  cleaned = cleaned
+    .replace(/CREATED:.*$/gm, "")
+    .replace(/SOURCE:.*$/gm, "")
+    .trim();
+
+  return cleaned;
+}
+
+// --- Routes ---
 app.get("/api/notams", async (req, res) => {
   const icao = (req.query.icao || "KMGM").toUpperCase();
-  const notams = await scrapeNotams(icao);
-  res.json({ icao, notams });
+  const data = await scrapeNotams(icao);
+  res.json({ notams: data });
 });
 
-// Example health route
+// Health check
 app.get("/", (req, res) => {
-  res.send("✅ Airfield Dashboard Backend is running.");
+  res.send("✅ Airfield Dashboard backend is running.");
 });
 
-// ===== START SERVER =====
+// --- Start server ---
 app.listen(PORT, () => {
   console.log(`🚀 Backend listening on port ${PORT}`);
-  // Optional: fetch once on startup
-  scrapeNotams("KMGM");
+  scrapeNotams("KMGM"); // Fetch initial NOTAMs
 });
