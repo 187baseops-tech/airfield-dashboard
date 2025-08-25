@@ -4,6 +4,7 @@ import axios from "axios";
 import solclientjs from "solclientjs";
 import { parseStringPromise } from "xml2js";
 import https from "https";
+import * as cheerio from "cheerio";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -33,7 +34,7 @@ solclientjs.SolclientFactory.init({
 });
 
 // ---------------------------------------
-// Scraper: Fetch baseline NOTAMs from OurAirports (HTTPS, ignore bad certs)
+// Scraper: Fetch baseline NOTAMs from OurAirports (cheerio parsing)
 // ---------------------------------------
 async function fetchBaselineNotams() {
   try {
@@ -50,36 +51,33 @@ async function fetchBaselineNotams() {
     });
 
     const html = res.data;
+    const $ = cheerio.load(html);
 
-    // Match NOTAM containers (<div class="notam">) or <pre> fallback
-    const matches = [
-      ...html.matchAll(/<div[^>]*class=["']notam["'][^>]*>([\s\S]*?)<\/div>/gi),
-      ...html.matchAll(/<pre[^>]*>([\s\S]*?)<\/pre>/gi),
-    ];
-
-    if (matches.length > 0) {
-      matches.forEach((m, idx) => {
-        // Remove any HTML tags inside the block
-        const rawNotam = m[1]
-          .replace(/<[^>]+>/g, "")
-          .replace(/\s+/g, " ")
-          .trim();
-
-        if (rawNotam.length > 0) {
-          activeNotams.push({
-            id: `BASE-${Date.now()}-${idx}`,
-            icao: "KMGM",
-            text: rawNotam,
-            startTime: new Date().toISOString(),
-            endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-          });
-        }
-      });
-
-      console.log(`✅ Loaded ${activeNotams.length} baseline KMGM NOTAMs from OurAirports`);
-    } else {
+    const notamDivs = $("div.notam");
+    if (notamDivs.length === 0) {
       console.log("⚠️ OurAirports returned no KMGM NOTAMs (maybe clear airfield)");
+      return;
     }
+
+    notamDivs.each((idx, el) => {
+      const rawNotam = $(el)
+        .find("p")
+        .map((i, p) => $(p).text().trim())
+        .get()
+        .join(" ");
+
+      if (rawNotam.length > 0) {
+        activeNotams.push({
+          id: `BASE-${Date.now()}-${idx}`,
+          icao: "KMGM",
+          text: rawNotam,
+          startTime: new Date().toISOString(),
+          endTime: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+        });
+      }
+    });
+
+    console.log(`✅ Loaded ${activeNotams.length} baseline KMGM NOTAMs from OurAirports`);
   } catch (err) {
     console.error("❌ OurAirports scraper failed:", err.message);
   }
