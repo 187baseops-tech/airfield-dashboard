@@ -52,8 +52,16 @@ console.log("⚙️ process.cwd():", process.cwd());
 console.log("⚙️ SLIDES_DIR is set to:", SLIDES_DIR);
 console.log("⚙️ ANNOT_FILE is set to:", ANNOT_FILE);
 
-// ---- NOTAM Scraper ----
-async function fetchNotams(icao = "KMGM") {
+// ---- NOTAM Scraper with Cache ----
+let notamCache = { ts: 0, data: [] };
+
+async function fetchNotams(icao = "KMGM", force = false) {
+  const now = Date.now();
+  if (!force && now - notamCache.ts < 15 * 60 * 1000) {
+    console.log("⏳ Returning cached NOTAMs");
+    return notamCache.data;
+  }
+
   try {
     console.log(`🌐 Scraping NOTAMs for ${icao}...`);
     const httpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -98,7 +106,7 @@ async function fetchNotams(icao = "KMGM") {
       });
     });
 
-    // 🔹 Detect Navaid outages from NOTAMs
+    // 🔹 Detect Navaid outages
     const outageKeywords = ["U/S", "UNSERVICEABLE", "OUT OF SERVICE"];
     const navaidOutages = { mgm: "IN", ils10: "IN", ils28: "IN" };
 
@@ -113,11 +121,11 @@ async function fetchNotams(icao = "KMGM") {
       }
     }
 
-    // 🔹 Merge with saved state (manual toggles still possible)
     savedState.navaids = { ...savedState.navaids, ...navaidOutages };
     saveState();
 
-    console.log(`✅ Found ${notams.length} NOTAMs, applied navaid outages:`, navaidOutages);
+    notamCache = { ts: now, data: notams };
+    console.log(`✅ Found ${notams.length} NOTAMs`);
     return notams;
   } catch (err) {
     console.error("❌ NOTAM scrape failed:", err.message);
@@ -153,7 +161,7 @@ app.post("/api/state", (req, res) => {
   res.json({ ok: true, state: savedState });
 });
 
-// NAVAIDs + BASH helpers
+// NAVAIDs + BASH
 app.get("/api/navaids", (req, res) => res.json(savedState.navaids));
 app.post("/api/navaids", (req, res) => {
   const { name } = req.body;
@@ -167,7 +175,6 @@ app.get("/api/bash", (req, res) => res.json(savedState.bash));
 
 // Slides + Annotations
 app.use("/slides", express.static(SLIDES_DIR));
-
 app.get("/api/slides", (req, res) => {
   try {
     if (!fs.existsSync(SLIDES_DIR)) return res.json([]);
@@ -179,7 +186,6 @@ app.get("/api/slides", (req, res) => {
     res.json([]);
   }
 });
-
 app.get("/api/annotations", (req, res) => {
   if (fs.existsSync(ANNOT_FILE)) {
     try {
@@ -192,7 +198,6 @@ app.get("/api/annotations", (req, res) => {
     res.json({ slides: {} });
   }
 });
-
 app.post("/api/annotations", (req, res) => {
   try {
     fs.writeFileSync(ANNOT_FILE, JSON.stringify(req.body, null, 2));
