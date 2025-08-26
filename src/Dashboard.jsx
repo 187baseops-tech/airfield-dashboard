@@ -145,7 +145,7 @@ function SlidesCard() {
           const rect = containerRef.current.getBoundingClientRect();
           setStageSize({
             width: rect.width,
-            height: isFullscreen ? window.innerHeight - 50 : rect.height,
+            height: rect.height,
           });
         }
       }, 50);
@@ -174,22 +174,14 @@ function SlidesCard() {
     }
   }, [selectedId, annotations]);
 
-  // Escape key support to exit fullscreen
+  // Escape key to exit fullscreen
   useEffect(() => {
     const handleKey = (e) => {
-      if (e.key === "Escape" && isFullscreen) {
-        setIsFullscreen(false);
-        setTimeout(() => {
-          if (containerRef.current) {
-            const rect = containerRef.current.getBoundingClientRect();
-            setStageSize({ width: rect.width, height: rect.height });
-          }
-        }, 50);
-      }
+      if (e.key === "Escape") setIsFullscreen(false);
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [isFullscreen]);
+  }, []);
 
   const saveAnnotations = (updated) => {
     setAnnotations(updated);
@@ -269,193 +261,196 @@ function SlidesCard() {
       : (val - (axis === "x" ? offsetX : offsetY)) / scale;
   };
 
+  const renderStage = () => (
+    <Stage
+      ref={stageRef}
+      width={stageSize.width}
+      height={stageSize.height}
+      onMouseDown={(e) => {
+        if (!tool || e.target !== e.target.getStage()) return;
+        const pos = e.target.getStage().getPointerPosition();
+        if (!pos) return;
+
+        const imgX = (pos.x - offsetX) / scale;
+        const imgY = (pos.y - offsetY) / scale;
+
+        if (tool === "box") {
+          setDrawing({ type: "box", x: imgX, y: imgY, w: 0, h: 0 });
+        } else if (tool === "arrow") {
+          setDrawing({ type: "arrow", x1: imgX, y1: imgY, x2: imgX, y2: imgY });
+        } else if (tool === "x") {
+          addAnnotation({ type: "x", x: imgX, y: imgY });
+        } else if (tool === "text") {
+          const text = prompt("Enter note:");
+          if (text) addAnnotation({ type: "text", x: imgX, y: imgY, text });
+        }
+      }}
+      onMouseMove={(e) => {
+        if (!drawing) return;
+        const pos = e.target.getStage().getPointerPosition();
+        if (!pos) return;
+
+        const imgX = (pos.x - offsetX) / scale;
+        const imgY = (pos.y - offsetY) / scale;
+
+        if (drawing.type === "box") {
+          setDrawing({ ...drawing, w: imgX - drawing.x, h: imgY - drawing.y });
+        } else if (drawing.type === "arrow") {
+          setDrawing({ ...drawing, x2: imgX, y2: imgY });
+        }
+      }}
+      onMouseUp={() => {
+        if (drawing) {
+          addAnnotation(drawing);
+          setDrawing(null);
+        }
+      }}
+    >
+      <Layer>
+        <KonvaImage
+          image={imageObj}
+          x={offsetX}
+          y={offsetY}
+          width={drawW}
+          height={drawH}
+          listening={false}
+        />
+
+        {annotations[slideKey]?.map((a) => {
+          const ax = migrate(a.x, "x");
+          const ay = migrate(a.y, "y");
+
+          const commonProps = {
+            key: a._id,
+            id: a._id,
+            draggable: true,
+            onClick: () => setSelectedId(a._id),
+            onTap: () => setSelectedId(a._id),
+            onContextMenu: (e) => {
+              e.evt.preventDefault();
+              deleteAnnotation(a._id);
+            },
+            onDragEnd: (e) => {
+              const imgX = (e.target.x() - offsetX) / scale;
+              const imgY = (e.target.y() - offsetY) / scale;
+              updateAnnotation(a._id, { x: imgX, y: imgY });
+            },
+          };
+
+          if (a.type === "box")
+            return (
+              <Rect
+                {...commonProps}
+                x={offsetX + ax * scale}
+                y={offsetY + ay * scale}
+                width={a.w * scale}
+                height={a.h * scale}
+                stroke="red"
+              />
+            );
+          if (a.type === "x")
+            return (
+              <KText
+                {...commonProps}
+                x={offsetX + ax * scale}
+                y={offsetY + ay * scale}
+                text="X"
+                fontSize={32 * scale}
+                fill="red"
+              />
+            );
+          if (a.type === "arrow")
+            return (
+              <Arrow
+                {...commonProps}
+                points={[
+                  offsetX + migrate(a.x1, "x") * scale,
+                  offsetY + migrate(a.y1, "y") * scale,
+                  offsetX + migrate(a.x2, "x") * scale,
+                  offsetY + migrate(a.y2, "y") * scale,
+                ]}
+                stroke="green"
+                strokeWidth={4 * scale}
+                pointerLength={10 * scale}
+                pointerWidth={10 * scale}
+              />
+            );
+          if (a.type === "text")
+            return (
+              <KText
+                {...commonProps}
+                x={offsetX + ax * scale}
+                y={offsetY + ay * scale}
+                text={a.text}
+                fontSize={16 * scale}
+                fill="white"
+              />
+            );
+          return null;
+        })}
+
+        {drawing?.type === "box" && (
+          <Rect
+            x={offsetX + drawing.x * scale}
+            y={offsetY + drawing.y * scale}
+            width={drawing.w * scale}
+            height={drawing.h * scale}
+            stroke="red"
+            dash={[4, 4]}
+          />
+        )}
+        {drawing?.type === "arrow" && (
+          <Arrow
+            points={[
+              offsetX + drawing.x1 * scale,
+              offsetY + drawing.y1 * scale,
+              offsetX + drawing.x2 * scale,
+              offsetY + drawing.y2 * scale,
+            ]}
+            stroke="green"
+            strokeWidth={4 * scale}
+            pointerLength={10 * scale}
+            pointerWidth={10 * scale}
+            dash={[4, 4]}
+          />
+        )}
+
+        <Transformer ref={trRef} rotateEnabled resizeEnabled />
+      </Layer>
+    </Stage>
+  );
+
   return (
     <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2 relative">
       <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
 
-      {isFullscreen && (
-        <button
-          onClick={() => {
-            setIsFullscreen(false);
-            setTimeout(() => {
-              if (containerRef.current) {
-                const rect = containerRef.current.getBoundingClientRect();
-                setStageSize({ width: rect.width, height: rect.height });
-              }
-            }, 50);
-          }}
-          className="absolute top-2 right-2 px-3 py-1 bg-red-600 rounded z-50"
-        >
-          ✖ Close
-        </button>
-      )}
-
-      {file && imageObj ? (
-        <div
-          ref={containerRef}
-          className={`relative flex-1 bg-slate-900 rounded overflow-hidden ${
-            isFullscreen ? "fixed inset-0 z-40" : "h-[400px]"
-          }`}
-        >
-          <Stage
-            ref={stageRef}
-            width={stageSize.width}
-            height={stageSize.height}
-            onMouseDown={(e) => {
-              if (!tool || e.target !== e.target.getStage()) return;
-              const pos = e.target.getStage().getPointerPosition();
-              if (!pos) return;
-
-              const imgX = (pos.x - offsetX) / scale;
-              const imgY = (pos.y - offsetY) / scale;
-
-              if (tool === "box") {
-                setDrawing({ type: "box", x: imgX, y: imgY, w: 0, h: 0 });
-              } else if (tool === "arrow") {
-                setDrawing({ type: "arrow", x1: imgX, y1: imgY, x2: imgX, y2: imgY });
-              } else if (tool === "x") {
-                addAnnotation({ type: "x", x: imgX, y: imgY });
-              } else if (tool === "text") {
-                const text = prompt("Enter note:");
-                if (text) addAnnotation({ type: "text", x: imgX, y: imgY, text });
-              }
-            }}
-            onMouseMove={(e) => {
-              if (!drawing) return;
-              const pos = e.target.getStage().getPointerPosition();
-              if (!pos) return;
-
-              const imgX = (pos.x - offsetX) / scale;
-              const imgY = (pos.y - offsetY) / scale;
-
-              if (drawing.type === "box") {
-                setDrawing({ ...drawing, w: imgX - drawing.x, h: imgY - drawing.y });
-              } else if (drawing.type === "arrow") {
-                setDrawing({ ...drawing, x2: imgX, y2: imgY });
-              }
-            }}
-            onMouseUp={() => {
-              if (drawing) {
-                addAnnotation(drawing);
-                setDrawing(null);
-              }
-            }}
-          >
-            <Layer>
-              <KonvaImage
-                image={imageObj}
-                x={offsetX}
-                y={offsetY}
-                width={drawW}
-                height={drawH}
-                listening={false}
-              />
-
-              {annotations[slideKey]?.map((a) => {
-                const ax = migrate(a.x, "x");
-                const ay = migrate(a.y, "y");
-
-                const commonProps = {
-                  key: a._id,
-                  id: a._id,
-                  draggable: true,
-                  onClick: () => setSelectedId(a._id),
-                  onTap: () => setSelectedId(a._id),
-                  onContextMenu: (e) => {
-                    e.evt.preventDefault();
-                    deleteAnnotation(a._id);
-                  },
-                  onDragEnd: (e) => {
-                    const imgX = (e.target.x() - offsetX) / scale;
-                    const imgY = (e.target.y() - offsetY) / scale;
-                    updateAnnotation(a._id, { x: imgX, y: imgY });
-                  },
-                };
-
-                if (a.type === "box")
-                  return (
-                    <Rect
-                      {...commonProps}
-                      x={offsetX + ax * scale}
-                      y={offsetY + ay * scale}
-                      width={a.w * scale}
-                      height={a.h * scale}
-                      stroke="red"
-                    />
-                  );
-                if (a.type === "x")
-                  return (
-                    <KText
-                      {...commonProps}
-                      x={offsetX + ax * scale}
-                      y={offsetY + ay * scale}
-                      text="X"
-                      fontSize={32 * scale}
-                      fill="red"
-                    />
-                  );
-                if (a.type === "arrow")
-                  return (
-                    <Arrow
-                      {...commonProps}
-                      points={[
-                        offsetX + migrate(a.x1, "x") * scale,
-                        offsetY + migrate(a.y1, "y") * scale,
-                        offsetX + migrate(a.x2, "x") * scale,
-                        offsetY + migrate(a.y2, "y") * scale,
-                      ]}
-                      stroke="green"
-                      strokeWidth={4 * scale}
-                      pointerLength={10 * scale}
-                      pointerWidth={10 * scale}
-                    />
-                  );
-                if (a.type === "text")
-                  return (
-                    <KText
-                      {...commonProps}
-                      x={offsetX + ax * scale}
-                      y={offsetY + ay * scale}
-                      text={a.text}
-                      fontSize={16 * scale}
-                      fill="white"
-                    />
-                  );
-                return null;
-              })}
-
-              {drawing?.type === "box" && (
-                <Rect
-                  x={offsetX + drawing.x * scale}
-                  y={offsetY + drawing.y * scale}
-                  width={drawing.w * scale}
-                  height={drawing.h * scale}
-                  stroke="red"
-                  dash={[4, 4]}
-                />
-              )}
-              {drawing?.type === "arrow" && (
-                <Arrow
-                  points={[
-                    offsetX + drawing.x1 * scale,
-                    offsetY + drawing.y1 * scale,
-                    offsetX + drawing.x2 * scale,
-                    offsetY + drawing.y2 * scale,
-                  ]}
-                  stroke="green"
-                  strokeWidth={4 * scale}
-                  pointerLength={10 * scale}
-                  pointerWidth={10 * scale}
-                  dash={[4, 4]}
-                />
-              )}
-
-              <Transformer ref={trRef} rotateEnabled resizeEnabled />
-            </Layer>
-          </Stage>
+      {isFullscreen ? (
+        <div className="fixed inset-0 z-40 bg-black flex flex-col">
+          <div className="flex justify-between p-2 bg-slate-900 text-white relative z-50">
+            <button
+              onClick={() => setIsFullscreen(false)}
+              className="px-3 py-1 bg-red-600 rounded"
+            >
+              ✖ Close
+            </button>
+            <button
+              onClick={clearAllAnnotations}
+              className="px-3 py-1 bg-yellow-600 rounded"
+            >
+              🧹 Clear All
+            </button>
+          </div>
+          <div ref={containerRef} className="flex-1 flex items-center justify-center overflow-auto">
+            {renderStage()}
+          </div>
         </div>
       ) : (
-        <p className="text-slate-400">No slide selected.</p>
+        <div
+          ref={containerRef}
+          className="relative flex-1 bg-slate-900 rounded overflow-hidden h-[400px]"
+        >
+          {renderStage()}
+        </div>
       )}
 
       {/* Toolbar */}
