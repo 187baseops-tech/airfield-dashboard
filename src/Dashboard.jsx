@@ -75,41 +75,13 @@ function computeFits(tempC, dewC) {
 
   return { level, wbgt: Math.round(wbgt) };
 }
-
-// --- Persistent State Helpers ---
-async function fetchState(API, setFns) {
-  try {
-    const res = await axios.get(`${API}/api/state`);
-    const s = res.data;
-
-    setFns.setActiveRunway(s.airfield.activeRunway);
-    setFns.setRsc(s.airfield.rsc);
-    setFns.setRscNotes(s.airfield.rscNotes);
-    setFns.setBarriers(s.airfield.barriers);
-    setFns.setArff(s.airfield.arff);
-    setFns.setNavaids(s.navaids);
-    setFns.setBash(s.bash);
-  } catch (err) {
-    console.error("Failed to fetch state:", err.message);
-  }
-}
-
-async function saveState(API, updated) {
-  try {
-    await axios.post(`${API}/api/state`, updated);
-  } catch (err) {
-    console.error("Failed to save state:", err.message);
-  }
-}
-
-// --- SlidesCard (unchanged except uses API) ---
+// --- SlidesCard ---
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [annotations, setAnnotations] = useState({});
   const [tool, setTool] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const svgRef = useRef();
 
   const API = process.env.REACT_APP_API_URL || "https://one87oss-airfield-dashboard.onrender.com";
@@ -151,6 +123,63 @@ function SlidesCard() {
     saveAnnotations(annots);
   };
 
+  // Handle click/drag for annotation tools
+  const handleClick = (e) => {
+    if (!tool || slides.length === 0) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const file = slides[currentSlide];
+    if (!file) return;
+
+    const slideKey = file;
+    const annots = { ...annotations };
+    if (!annots[slideKey]) annots[slideKey] = [];
+
+    if (tool === "x") {
+      annots[slideKey].push({ type: "x", x, y });
+    } else if (tool === "text") {
+      const text = prompt("Enter note:");
+      if (text) annots[slideKey].push({ type: "text", x, y, text });
+    }
+    saveAnnotations(annots);
+  };
+
+  const handleDragStart = (e) => {
+    if (!tool || slides.length === 0) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    svgRef.current.dataset.startX = e.clientX - rect.left;
+    svgRef.current.dataset.startY = e.clientY - rect.top;
+  };
+
+  const handleDragEnd = (e) => {
+    if (!tool || slides.length === 0) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const x2 = e.clientX - rect.left;
+    const y2 = e.clientY - rect.top;
+    const x1 = parseFloat(svgRef.current.dataset.startX);
+    const y1 = parseFloat(svgRef.current.dataset.startY);
+    const file = slides[currentSlide];
+    if (!file) return;
+
+    const slideKey = file;
+    const annots = { ...annotations };
+    if (!annots[slideKey]) annots[slideKey] = [];
+
+    if (tool === "box") {
+      annots[slideKey].push({
+        type: "box",
+        x: Math.min(x1, x2),
+        y: Math.min(y1, y2),
+        w: Math.abs(x2 - x1),
+        h: Math.abs(y2 - y1)
+      });
+    } else if (tool === "arrow") {
+      annots[slideKey].push({ type: "arrow", x1, y1, x2, y2 });
+    }
+    saveAnnotations(annots);
+  };
+
   if (slides.length === 0) {
     return (
       <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px] md:col-span-2">
@@ -174,13 +203,58 @@ function SlidesCard() {
             alt="Slide"
             className="object-contain max-h-full max-w-full"
           />
+          <svg
+            ref={svgRef}
+            className="absolute inset-0 w-full h-full"
+            onClick={handleClick}
+            onMouseDown={handleDragStart}
+            onMouseUp={handleDragEnd}
+          >
+            <defs>
+              <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="green" />
+              </marker>
+            </defs>
+            {annotations[slideKey]?.map((a, i) => {
+              if (a.type === "box")
+                return (
+                  <rect key={i} x={a.x} y={a.y} width={a.w} height={a.h} className="stroke-red-600 fill-transparent" />
+                );
+              if (a.type === "x")
+                return (
+                  <text key={i} x={a.x} y={a.y} fontSize="32" fill="red" fontWeight="bold">X</text>
+                );
+              if (a.type === "arrow")
+                return (
+                  <line
+                    key={i}
+                    x1={a.x1}
+                    y1={a.y1}
+                    x2={a.x2}
+                    y2={a.y2}
+                    stroke="green"
+                    strokeWidth="4"
+                    markerEnd="url(#arrowhead)"
+                  />
+                );
+              if (a.type === "text")
+                return (
+                  <foreignObject key={i} x={a.x} y={a.y} width="200" height="50">
+                    <div className="px-1 text-sm font-bold text-white bg-black border border-red-600 rounded">
+                      {a.text}
+                    </div>
+                  </foreignObject>
+                );
+              return null;
+            })}
+          </svg>
         </div>
       ) : (
         <p className="text-slate-400">No slide selected.</p>
       )}
 
       {/* Controls */}
-      <div className="flex justify-center gap-2 mt-3">
+      <div className="flex flex-wrap justify-center gap-2 mt-3">
         <button onClick={prevSlide} className="px-3 py-1 bg-slate-700 rounded">⏮ Prev</button>
         <button onClick={nextSlide} className="px-3 py-1 bg-slate-700 rounded">⏭ Next</button>
         <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-slate-700 rounded">
@@ -188,150 +262,21 @@ function SlidesCard() {
         </button>
         <button onClick={clearAnnotations} className="px-3 py-1 bg-red-600 rounded">🗑 Clear</button>
       </div>
+
+      {/* Annotation Tools */}
+      <div className="flex flex-wrap justify-center gap-2 mt-2">
+        <button onClick={() => setTool("x")} className={`px-3 py-1 rounded ${tool==="x"?"bg-blue-600":"bg-slate-700"}`}>❌ X</button>
+        <button onClick={() => setTool("box")} className={`px-3 py-1 rounded ${tool==="box"?"bg-blue-600":"bg-slate-700"}`}>⬛ Box</button>
+        <button onClick={() => setTool("arrow")} className={`px-3 py-1 rounded ${tool==="arrow"?"bg-blue-600":"bg-slate-700"}`}>➡️ Arrow</button>
+        <button onClick={() => setTool("text")} className={`px-3 py-1 rounded ${tool==="text"?"bg-blue-600":"bg-slate-700"}`}>📝 Text</button>
+      </div>
     </section>
-  );
-}
-
-  const file = slides[currentSlide] || null;
-  const slideKey = file || "unknown";
-
-  const viewer = file ? (
-    <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-full">
-      <img
-        src={`${API}/slides/${file}`} 
-        alt="Slide"
-        className="object-contain max-h-full max-w-full"
-      />
-      <svg
-        ref={svgRef}
-        className="absolute inset-0 w-full h-full"
-        onClick={handleClick}
-        onMouseDown={handleDragStart}
-        onMouseUp={handleDragEnd}
-      >
-        <defs>
-          <marker
-            id="arrowhead"
-            markerWidth="10"
-            markerHeight="7"
-            refX="10"
-            refY="3.5"
-            orient="auto"
-          >
-            <polygon points="0 0, 10 3.5, 0 7" fill="green" />
-          </marker>
-        </defs>
-        {annotations[slideKey]?.map((a, i) => {
-          if (a.type === "box")
-            return (
-              <rect
-                key={i}
-                x={a.x}
-                y={a.y}
-                width={a.w}
-                height={a.h}
-                className="stroke-red-600 fill-transparent"
-              />
-            );
-          if (a.type === "x")
-            return (
-              <text key={i} x={a.x} y={a.y} fontSize="32" fill="red" fontWeight="bold">
-                X
-              </text>
-            );
-          if (a.type === "arrow")
-            return (
-              <line
-                key={i}
-                x1={a.x1}
-                y1={a.y1}
-                x2={a.x2}
-                y2={a.y2}
-                stroke="green"
-                strokeWidth="4"
-                markerEnd="url(#arrowhead)"
-              />
-            );
-          if (a.type === "text")
-            return (
-              <foreignObject key={i} x={a.x} y={a.y} width="200" height="50">
-                <div
-                  className="px-1 text-sm font-bold text-white bg-black border border-red-600 rounded"
-                  style={{ display: "inline-block", maxWidth: "180px", wordWrap: "break-word" }}
-                >
-                  {a.text}
-                </div>
-              </foreignObject>
-            );
-          return null;
-        })}
-      </svg>
-    </div>
-  ) : (
-    <p className="text-slate-400">No slide selected.</p>
-  );
-
-  return (
-    <>
-      {/* Card View */}
-      {!isFullscreen && (
-        <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
-          <h2 className="text-lg font-bold underline mb-2 flex justify-between items-center">
-            Airfield Slides
-            <button
-              onClick={() => setIsFullscreen(true)}
-              className="px-2 py-1 bg-slate-700 rounded text-sm"
-            >
-              🔎 Expand
-            </button>
-          </h2>
-
-          <div className="relative bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[500px]">
-            {file ? (
-              <img
-                src={`${API}/slides/${file}`} 
-                alt="Slide"
-                className="absolute inset-0 w-full h-full object-contain"
-              />
-            ) : (
-              <p className="text-slate-400">No slide selected.</p>
-            )}
-            <svg
-              ref={svgRef}
-              className="absolute inset-0 w-full h-full"
-              onClick={handleClick}
-              onMouseDown={handleDragStart}
-              onMouseUp={handleDragEnd}
-            >
-              {/* Annotation rendering would go here */}
-            </svg>
-          </div>
-        </section>
-      )}
-
-      {/* Fullscreen View */}
-      {isFullscreen && (
-        <div className="fixed inset-0 z-50 bg-black bg-opacity-95 flex flex-col">
-          <div className="flex justify-between items-center p-3 text-white">
-            <h2 className="text-lg font-bold">Airfield Slides</h2>
-            <button
-              onClick={() => setIsFullscreen(false)}
-              className="px-2 py-1 bg-red-600 rounded"
-            >
-              ❌ Close
-            </button>
-          </div>
-          <div className="flex-1 flex items-center justify-center">{viewer}</div>
-        </div>
-      )}
-    </>
   );
 }
 // --- Main Dashboard ---
 export default function Dashboard() {
   const ICAO = "KMGM";
 
-  // Weather + NOTAMs
   const [metar, setMetar] = useState("");
   const [taf, setTaf] = useState("");
   const [parsed, setParsed] = useState({});
@@ -349,9 +294,17 @@ export default function Dashboard() {
   const [barriers, setBarriers] = useState({ east: "DOWN", west: "DOWN" });
   const [navaids, setNavaids] = useState({});
   const [arff, setArff] = useState("GREEN");
-  const [bash, setBash] = useState({});
+  const [bash, setBash] = useState({
+    KMGM: "LOW",
+    KMXF: "LOW",
+    PHCR_MOA: "LOW",
+    BHM_MOA: "LOW",
+    VR060: "LOW",
+    VR1056: "LOW",
+    ShelbyRange: "LOW",
+  });
 
-  const API = process.env.REACT_APP_API_URL;
+  const API = process.env.REACT_APP_API_URL || "https://one87oss-airfield-dashboard.onrender.com";
 
   // --- Fetch METAR/TAF/NOTAMs ---
   async function fetchData() {
@@ -359,9 +312,8 @@ export default function Dashboard() {
       const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
       const t = await axios.get(`${API}/api/taf?icao=${ICAO}`);
       const n = await axios.get(`${API}/api/notams?icao=${ICAO}`);
-
-      setMetar(m.data.raw || "");
-      setTaf(t.data.raw || "");
+      setMetar(m.data.rawOb || m.data.raw || "");
+      setTaf(t.data.rawTAF || t.data.raw || "");
       setNotams(n.data?.notams || []);
       setLastUpdate(new Date());
     } catch (err) {
@@ -369,32 +321,34 @@ export default function Dashboard() {
     }
   }
 
-  // --- Load state on mount ---
+  // --- Fetch NAVAIDs & BASH ---
+  async function fetchNavaids() {
+    try {
+      const res = await axios.get(`${API}/api/navaids`);
+      setNavaids(res.data);
+    } catch (err) {
+      console.error("Failed to fetch NAVAIDs:", err.message);
+    }
+  }
+
+  async function fetchBash() {
+    try {
+      const res = await axios.get(`${API}/api/bash`);
+      setBash(res.data);
+    } catch (err) {
+      console.error("Failed to fetch BASH:", err.message);
+    }
+  }
+
   useEffect(() => {
     fetchData();
-    fetchState(API, {
-      setActiveRunway,
-      setRsc,
-      setRscNotes,
-      setBarriers,
-      setArff,
-      setNavaids,
-      setBash,
-    });
-
+    fetchNavaids();
+    fetchBash();
     const timer = setInterval(() => {
       fetchData();
-      fetchState(API, {
-        setActiveRunway,
-        setRsc,
-        setRscNotes,
-        setBarriers,
-        setArff,
-        setNavaids,
-        setBash,
-      });
+      fetchNavaids();
+      fetchBash();
     }, 300000); // every 5 min
-
     return () => clearInterval(timer);
   }, []);
 
@@ -428,6 +382,7 @@ export default function Dashboard() {
     }
     setAltReq(altNeeded);
   }, [metar, taf]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4">
       {/* Header */}
@@ -445,15 +400,8 @@ export default function Dashboard() {
           <button
             onClick={() => {
               fetchData();
-              fetchState(API, {
-                setActiveRunway,
-                setRsc,
-                setRscNotes,
-                setBarriers,
-                setArff,
-                setNavaids,
-                setBash,
-              });
+              fetchNavaids();
+              fetchBash();
             }}
             className="mt-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded"
           >
@@ -473,19 +421,9 @@ export default function Dashboard() {
             <p className="font-semibold">Active Runway</p>
             <button
               className="px-3 py-1 rounded bg-green-600"
-              onClick={() => {
-                const newRunway = activeRunway === "10" ? "28" : "10";
-                setActiveRunway(newRunway);
-                saveState(API, {
-                  airfield: {
-                    activeRunway: newRunway,
-                    rsc,
-                    rscNotes,
-                    barriers,
-                    arff,
-                  },
-                });
-              }}
+              onClick={() =>
+                setActiveRunway(activeRunway === "10" ? "28" : "10")
+              }
             >
               {activeRunway}
             </button>
@@ -503,20 +441,15 @@ export default function Dashboard() {
                     ? "bg-red-600"
                     : "bg-slate-700"
                 }`}
-                onClick={() => {
-                  const newRsc =
-                    rsc === "DRY" ? "WET" : rsc === "WET" ? "N/A" : "DRY";
-                  setRsc(newRsc);
-                  saveState(API, {
-                    airfield: {
-                      activeRunway,
-                      rsc: newRsc,
-                      rscNotes,
-                      barriers,
-                      arff,
-                    },
-                  });
-                }}
+                onClick={() =>
+                  setRsc(
+                    rsc === "DRY"
+                      ? "WET"
+                      : rsc === "WET"
+                      ? "N/A"
+                      : "DRY"
+                  )
+                }
               >
                 {rsc}
               </button>
@@ -524,18 +457,7 @@ export default function Dashboard() {
                 type="text"
                 placeholder="Notes"
                 value={rscNotes}
-                onChange={(e) => {
-                  setRscNotes(e.target.value);
-                  saveState(API, {
-                    airfield: {
-                      activeRunway,
-                      rsc,
-                      rscNotes: e.target.value,
-                      barriers,
-                      arff,
-                    },
-                  });
-                }}
+                onChange={(e) => setRscNotes(e.target.value)}
                 className="flex-1 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-sm"
               />
             </div>
@@ -553,27 +475,16 @@ export default function Dashboard() {
                       ? "bg-red-600"
                       : "bg-green-600"
                   }`}
-                  onClick={() => {
-                    const newBarriers = {
-                      ...barriers,
+                  onClick={() =>
+                    setBarriers((prev) => ({
+                      ...prev,
                       [side]:
-                        barriers[side] === "DOWN"
+                        prev[side] === "DOWN"
                           ? "UP"
-                          : barriers[side] === "UP"
+                          : prev[side] === "UP"
                           ? "UNSERVICEABLE"
                           : "DOWN",
-                    };
-                    setBarriers(newBarriers);
-                    saveState(API, {
-                      airfield: {
-                        activeRunway,
-                        rsc,
-                        rscNotes,
-                        barriers: newBarriers,
-                        arff,
-                      },
-                    });
-                  }}
+                    }))}
                 >
                   {side.toUpperCase()} BAK-12 {barriers[side]}
                 </button>
@@ -586,19 +497,11 @@ export default function Dashboard() {
             <p className="font-semibold">NAVAIDs</p>
             <div className="flex gap-2 flex-wrap">
               {Object.keys(navaids).map((n) => (
-                <button
+                <div
                   key={n}
                   className={`px-2 py-1 rounded ${
                     navaids[n] === "IN" ? "bg-green-600" : "bg-red-600"
                   }`}
-                  onClick={() => {
-                    const newNavaids = {
-                      ...navaids,
-                      [n]: navaids[n] === "IN" ? "OUT" : "IN",
-                    };
-                    setNavaids(newNavaids);
-                    saveState(API, { navaids: newNavaids });
-                  }}
                 >
                   {n === "mgm"
                     ? "MGM TACAN"
@@ -608,9 +511,8 @@ export default function Dashboard() {
                     ? "ILS 10"
                     : n === "ils28"
                     ? "ILS 28"
-                    : n.toUpperCase()}{" "}
-                  {navaids[n]}
-                </button>
+                    : n.toUpperCase()}
+                </div>
               ))}
             </div>
           </div>
@@ -626,18 +528,15 @@ export default function Dashboard() {
                   ? "bg-yellow-500"
                   : "bg-red-600"
               }`}
-              onClick={() => {
-                const newArff =
+              onClick={() =>
+                setArff(
                   arff === "GREEN"
                     ? "YELLOW"
                     : arff === "YELLOW"
                     ? "RED"
-                    : "GREEN";
-                setArff(newArff);
-                saveState(API, {
-                  airfield: { activeRunway, rsc, rscNotes, barriers, arff: newArff },
-                });
-              }}
+                    : "GREEN"
+                )
+              }
             >
               ARFF {arff}
             </button>
@@ -722,10 +621,7 @@ export default function Dashboard() {
           {notams.length > 0 ? (
             <ul className="space-y-2 text-sm flex-1 overflow-y-auto">
               {notams.map((n) => (
-                <li
-                  key={n.id}
-                  className="p-2 rounded border border-slate-700 bg-slate-900"
-                >
+                <li key={n.id} className="p-2 rounded border border-slate-700 bg-slate-900">
                   <pre className="font-mono whitespace-pre-wrap">{n.text}</pre>
                 </li>
               ))}
@@ -735,6 +631,7 @@ export default function Dashboard() {
           )}
         </section>
       </div>
+
       {/* Second Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch mt-4">
         {/* BASH Forecast */}
@@ -753,20 +650,19 @@ export default function Dashboard() {
                     ? "bg-red-600"
                     : "bg-slate-700"
                 }`}
-                onClick={() => {
-                  const newVal =
-                    bash[loc] === "LOW"
-                      ? "MODERATE"
-                      : bash[loc] === "MODERATE"
-                      ? "SEVERE"
-                      : bash[loc] === "SEVERE"
-                      ? "N/A"
-                      : "LOW";
-
-                  const newBash = { ...bash, [loc]: newVal };
-                  setBash(newBash);
-                  saveState(API, { bash: newBash });
-                }}
+                onClick={() =>
+                  setBash((prev) => ({
+                    ...prev,
+                    [loc]:
+                      prev[loc] === "LOW"
+                        ? "MODERATE"
+                        : prev[loc] === "MODERATE"
+                        ? "SEVERE"
+                        : prev[loc] === "SEVERE"
+                        ? "N/A"
+                        : "LOW",
+                  }))
+                }
               >
                 {loc}: {bash[loc]}
               </button>
