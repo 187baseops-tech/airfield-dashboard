@@ -10,6 +10,7 @@ import {
   Group,
   Label,
   Tag,
+  Image as KonvaImage,
 } from "react-konva";
 import { v4 as uuidv4 } from "uuid";
 
@@ -120,6 +121,7 @@ function SlidesCard() {
       ? process.env.REACT_APP_API_URL
       : "https://one87oss-airfield-dashboard.onrender.com";
 
+  // load slides + annotations
   useEffect(() => {
     axios.get(`${API}/api/slides`).then((res) => setSlides(res.data));
     axios.get(`${API}/api/annotations`).then((res) =>
@@ -127,6 +129,7 @@ function SlidesCard() {
     );
   }, [API]);
 
+  // autoplay
   useEffect(() => {
     if (isPlaying && slides.length > 0) {
       const interval = setInterval(
@@ -240,13 +243,167 @@ function SlidesCard() {
 
       {file ? (
         <SlideContainer>
-          <img
-            src={`${API}/slides/${file}`}
-            alt="Slide"
-            className="object-contain max-h-full max-w-full"
-          />
-          {/* Stage, annotations, transformer — same as before */}
-          {/* ... */}
+          <Stage
+            width={isFullscreen ? window.innerWidth : 800}
+            height={isFullscreen ? window.innerHeight - 50 : 400}
+            className="absolute inset-0 w-full h-full"
+            onMouseDown={(e) => {
+              if (!tool || e.target !== e.target.getStage()) return;
+              const pos = e.target.getStage().getPointerPosition();
+              if (!pos) return;
+
+              if (tool === "box") {
+                setDrawing({ type: "box", x: pos.x, y: pos.y, w: 0, h: 0 });
+              } else if (tool === "arrow") {
+                setDrawing({
+                  type: "arrow",
+                  x1: pos.x,
+                  y1: pos.y,
+                  x2: pos.x,
+                  y2: pos.y,
+                });
+              } else if (tool === "x") {
+                addAnnotation({ type: "x", x: pos.x, y: pos.y });
+              } else if (tool === "text") {
+                const text = prompt("Enter note:");
+                if (text) addAnnotation({ type: "text", x: pos.x, y: pos.y, text });
+              }
+            }}
+            onMouseMove={(e) => {
+              if (!drawing) return;
+              const pos = e.target.getStage().getPointerPosition();
+              if (!pos) return;
+
+              if (drawing.type === "box") {
+                setDrawing({
+                  ...drawing,
+                  w: pos.x - drawing.x,
+                  h: pos.y - drawing.y,
+                });
+              } else if (drawing.type === "arrow") {
+                setDrawing({ ...drawing, x2: pos.x, y2: pos.y });
+              }
+            }}
+            onMouseUp={() => {
+              if (drawing) {
+                addAnnotation(drawing);
+                setDrawing(null);
+              }
+            }}
+          >
+            <Layer>
+              {/* Background slide image rendered via Konva */}
+              <KonvaImage
+                image={(() => {
+                  const img = new window.Image();
+                  img.src = `${API}/slides/${file}`;
+                  return img;
+                })()}
+                x={0}
+                y={0}
+                width={isFullscreen ? window.innerWidth : 800}
+                height={isFullscreen ? window.innerHeight - 50 : 400}
+              />
+
+              {/* Draw annotations */}
+              {annotations[slideKey]?.map((a) => {
+                const commonProps = {
+                  key: a._id,
+                  id: a._id,
+                  draggable: true,
+                  onClick: () => setSelectedId(a._id),
+                  onTap: () => setSelectedId(a._id),
+                  onDragEnd: (e) =>
+                    updateAnnotation(a._id, {
+                      x: e.target.x(),
+                      y: e.target.y(),
+                    }),
+                };
+
+                let shape;
+                if (a.type === "box") {
+                  shape = (
+                    <Rect {...commonProps} x={a.x} y={a.y} width={a.w} height={a.h} stroke="red" />
+                  );
+                } else if (a.type === "x") {
+                  shape = (
+                    <KText
+                      {...commonProps}
+                      x={a.x}
+                      y={a.y}
+                      text="X"
+                      fontSize={32}
+                      fill="red"
+                      fontStyle="bold"
+                    />
+                  );
+                } else if (a.type === "arrow") {
+                  shape = (
+                    <Arrow
+                      {...commonProps}
+                      points={[a.x1, a.y1, a.x2, a.y2]}
+                      stroke="green"
+                      strokeWidth={4}
+                      pointerLength={10}
+                      pointerWidth={10}
+                    />
+                  );
+                } else if (a.type === "text") {
+                  shape = (
+                    <KText
+                      {...commonProps}
+                      x={a.x}
+                      y={a.y}
+                      text={a.text}
+                      fontSize={16}
+                      fill="white"
+                      background="black"
+                    />
+                  );
+                }
+
+                return (
+                  <Group key={a._id}>
+                    {shape}
+                    {selectedId === a._id && (
+                      <Label
+                        x={(a.x || a.x1 || 0) + 10}
+                        y={(a.y || a.y1 || 0) - 20}
+                        onClick={() => deleteAnnotation(a._id)}
+                      >
+                        <Tag fill="red" pointerDirection="up" />
+                        <KText text="❌" fontSize={16} fill="white" padding={2} />
+                      </Label>
+                    )}
+                  </Group>
+                );
+              })}
+
+              {/* Temporary drawing preview */}
+              {drawing?.type === "box" && (
+                <Rect
+                  x={drawing.x}
+                  y={drawing.y}
+                  width={drawing.w}
+                  height={drawing.h}
+                  stroke="red"
+                  dash={[4, 4]}
+                />
+              )}
+              {drawing?.type === "arrow" && (
+                <Arrow
+                  points={[drawing.x1, drawing.y1, drawing.x2, drawing.y2]}
+                  stroke="green"
+                  strokeWidth={4}
+                  pointerLength={10}
+                  pointerWidth={10}
+                  dash={[4, 4]}
+                />
+              )}
+
+              <Transformer ref={trRef} rotateEnabled={true} resizeEnabled={true} />
+            </Layer>
+          </Stage>
         </SlideContainer>
       ) : (
         <p className="text-slate-400">No slide selected.</p>
@@ -286,25 +443,33 @@ function SlidesCard() {
       <div className="flex flex-wrap justify-center gap-2 mt-2">
         <button
           onClick={() => setTool("x")}
-          className={`px-3 py-1 rounded ${tool === "x" ? "bg-blue-600" : "bg-slate-700"}`}
+          className={`px-3 py-1 rounded ${
+            tool === "x" ? "bg-blue-600" : "bg-slate-700"
+          }`}
         >
           ❌ X
         </button>
         <button
           onClick={() => setTool("box")}
-          className={`px-3 py-1 rounded ${tool === "box" ? "bg-blue-600" : "bg-slate-700"}`}
+          className={`px-3 py-1 rounded ${
+            tool === "box" ? "bg-blue-600" : "bg-slate-700"
+          }`}
         >
           ⬛ Box
         </button>
         <button
           onClick={() => setTool("arrow")}
-          className={`px-3 py-1 rounded ${tool === "arrow" ? "bg-blue-600" : "bg-slate-700"}`}
+          className={`px-3 py-1 rounded ${
+            tool === "arrow" ? "bg-blue-600" : "bg-slate-700"
+          }`}
         >
           ➡️ Arrow
         </button>
         <button
           onClick={() => setTool("text")}
-          className={`px-3 py-1 rounded ${tool === "text" ? "bg-blue-600" : "bg-slate-700"}`}
+          className={`px-3 py-1 rounded ${
+            tool === "text" ? "bg-blue-600" : "bg-slate-700"
+          }`}
         >
           📝 Text
         </button>
@@ -312,6 +477,9 @@ function SlidesCard() {
     </section>
   );
 }
+
+export default SlidesCard;
+
 // --- Main Dashboard ---
 function CrosswindVisual({ wind, runway }) {
   if (!wind || wind === "--") return null;
