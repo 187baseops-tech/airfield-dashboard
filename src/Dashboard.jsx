@@ -211,31 +211,29 @@ function SlidesCard() {
   const slideKey = file || "unknown";
 
   const SlideContainer = ({ children }) =>
-    isFullscreen ? (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col">
-        <div className="flex justify-between p-2 bg-slate-900 text-white">
-          <button
-            onClick={() => setIsFullscreen(false)}
-            className="px-3 py-1 bg-red-600 rounded"
-          >
-            ✖ Close
-          </button>
-          <button
-            onClick={clearAllAnnotations}
-            className="px-3 py-1 bg-yellow-600 rounded"
-          >
-            🧹 Clear All
-          </button>
-        </div>
-        <div className="flex-1 flex items-center justify-center overflow-auto">
-          {children}
-        </div>
+  isFullscreen ? (
+    <div className="fixed inset-0 z-50 bg-black flex flex-col">
+      <div className="flex justify-between p-2 bg-slate-900 text-white">
+        <button
+          onClick={() => setIsFullscreen(false)}
+          className="px-3 py-1 bg-red-600 rounded"
+        >
+          ✖ Close
+        </button>
+        <button
+          onClick={clearAllAnnotations}
+          className="px-3 py-1 bg-yellow-600 rounded"
+        >
+          🧹 Clear All
+        </button>
       </div>
-    ) : (
-      <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[400px]">
+      <div className="flex-1 flex items-center justify-center overflow-auto">
         {children}
       </div>
-    );
+    </div>
+  ) : (
+    ...
+  );
 
   return (
     <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
