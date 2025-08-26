@@ -174,6 +174,23 @@ function SlidesCard() {
     }
   }, [selectedId, annotations]);
 
+  // Escape key support to exit fullscreen
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === "Escape" && isFullscreen) {
+        setIsFullscreen(false);
+        setTimeout(() => {
+          if (containerRef.current) {
+            const rect = containerRef.current.getBoundingClientRect();
+            setStageSize({ width: rect.width, height: rect.height });
+          }
+        }, 50);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [isFullscreen]);
+
   const saveAnnotations = (updated) => {
     setAnnotations(updated);
     axios.post(`${API}/api/annotations`, { slides: updated });
@@ -258,7 +275,15 @@ function SlidesCard() {
 
       {isFullscreen && (
         <button
-          onClick={() => setIsFullscreen(false)}
+          onClick={() => {
+            setIsFullscreen(false);
+            setTimeout(() => {
+              if (containerRef.current) {
+                const rect = containerRef.current.getBoundingClientRect();
+                setStageSize({ width: rect.width, height: rect.height });
+              }
+            }, 50);
+          }}
           className="absolute top-2 right-2 px-3 py-1 bg-red-600 rounded z-50"
         >
           ✖ Close
