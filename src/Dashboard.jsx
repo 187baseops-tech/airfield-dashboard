@@ -1,16 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import {
-  Stage,
-  Layer,
-  Rect,
-  Arrow,
-  Text as KText,
-  Transformer,
-  Group,
-  Label,
-  Tag,
-  Image as KonvaImage,
+import { 
+  Stage, 
+  Layer, 
+  Rect, 
+  Arrow, 
+  Text as KText, 
+  Transformer, 
+  Group, 
+  Label, 
+  Tag, 
+  Image as KonvaImage 
 } from "react-konva";
 import { v4 as uuidv4 } from "uuid";
 
@@ -105,7 +105,6 @@ function computeCrosswind(metarWind, activeRunway) {
   const cross = Math.round(spd * Math.sin((rel * Math.PI) / 180));
   return { crosswind: cross, warning: Math.abs(cross) >= 25 };
 }
-import { Image as KonvaImage } from "react-konva";
 
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
