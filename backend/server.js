@@ -62,27 +62,30 @@ async function fetchNotams(icao = "KMGM") {
       { httpsAgent }
     );
 
-    const $ = cheerio.load(html);
     const notams = [];
+    const lines = html.split("\n");
 
-    // Get ALL <pre> blocks (each NOTAM usually comes in one <pre>)
-    $("pre").each((_, el) => {
-      const text = $(el).text().trim();
-      if (!text) return;
+    // Look line by line for NOTAM-like patterns
+    for (const line of lines) {
+      const text = line.trim();
+      if (!text) continue;
 
-      const cleaned = text
-        .replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)")
-        .replace(/\s?NOTAMN/g, "")
-        .trim();
+      // Only grab lines that look like NOTAMs
+      if (/^(NOTAM|M\d{3,4}\/\d{2}|!\w{3}|FDC)/.test(text)) {
+        const cleaned = text
+          .replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)")
+          .replace(/\s?NOTAMN/g, "")
+          .trim();
 
-      // Try to find a NOTAM number (fallback = slice of text)
-      const match = cleaned.match(
-        /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
-      );
-      const id = match ? match[0] : cleaned.slice(0, 20);
+        // Extract NOTAM ID
+        const match = cleaned.match(
+          /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
+        );
+        const id = match ? match[0] : cleaned.slice(0, 20);
 
-      notams.push({ id, text: cleaned });
-    });
+        notams.push({ id, text: cleaned });
+      }
+    }
 
     console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
     return notams;
