@@ -62,11 +62,15 @@ async function fetchNotams(icao = "KMGM") {
       { httpsAgent }
     );
 
+    // Debug: log first 1000 chars so we know what structure is being returned
+    console.log("---- RAW HTML PREVIEW ----");
+    console.log(html.slice(0, 1000));
+    console.log("---- END PREVIEW ----");
+
     const $ = cheerio.load(html);
     const notams = [];
 
-    // Look for <pre> blocks inside #notams (primary container)
-    $("#notams pre, #notams li, #notams p").each((_, el) => {
+    $("pre, li, p").each((_, el) => {
       const text = $(el).text().trim();
       if (!text) return;
 
@@ -75,7 +79,6 @@ async function fetchNotams(icao = "KMGM") {
         .replace(/\s?NOTAMN/g, "")
         .trim();
 
-      // Extract NOTAM ID (FAA style or ICAO style)
       const match = cleaned.match(
         /(M?\d{3,4}\/\d{2}|\d{2}\/\d{3,4}|!\w{3}\s+\d{2}\/\d{3,4}|NOTAM\s+\d{1,4}\/\d{2})/
       );
