@@ -7,13 +7,13 @@ export default function App() {
   return (
     <Router basename="/">
       <Routes>
-        {/* Full interactive dashboard */}
-        <Route path="/" element={<Dashboard />} />
-
-        {/* Read-only kiosk dashboard */}
+        {/* Explicit kiosk route */}
         <Route path="/kiosk" element={<KioskDashboard />} />
 
-        {/* Optional: catch-all route (fallback to dashboard) */}
+        {/* Main dashboard */}
+        <Route path="/" element={<Dashboard />} />
+
+        {/* Catch-all fallback */}
         <Route path="*" element={<Dashboard />} />
       </Routes>
     </Router>
