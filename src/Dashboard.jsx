@@ -316,7 +316,6 @@ function SlidesCard() {
 function CrosswindVisual({ wind, runway }) {
   if (!wind || wind === "--") return null;
 
-  // Parse wind group (e.g., 03007KT → dir=030, spd=07)
   const match = wind.match(/(\d{3}|VRB)(\d{2})/);
   if (!match) return null;
 
@@ -324,34 +323,27 @@ function CrosswindVisual({ wind, runway }) {
   const spd = parseInt(match[2], 10);
   if (!spd) return null;
 
-  // Runway heading in degrees
   const runwayHeading = runway === "10" ? 100 : 280;
 
-  // Wind relative angle
-  const angleRad = ((dir - runwayHeading) * Math.PI) / 180;
+  // FIX: Flip 180° so arrow points FROM wind direction
+  const angleRad = (((dir + 180) - runwayHeading) * Math.PI) / 180;
 
-  // Compute headwind + crosswind
-  const headwind = (spd * Math.cos(angleRad)).toFixed(1);
-  const crosswind = (spd * Math.sin(angleRad)).toFixed(1);
-
-  // Crosswind severity color
-  const crosswindClass =
-    Math.abs(crosswind) >= 25 ? "text-red-500 font-bold" : "text-green-400 font-bold";
+  const headwind = (spd * Math.cos(angleRad)).toFixed(0);
+  const crosswind = (spd * Math.sin(angleRad)).toFixed(0);
 
   return (
-    <div className="mt-3 flex flex-col items-center text-sm border-t border-slate-700 pt-2">
-      <svg width="120" height="120" viewBox="0 0 120 120" className="mb-1">
+    <div className="absolute top-2 right-2 flex flex-col items-center text-xs">
+      <svg width="60" height="60" viewBox="0 0 120 120">
         {/* Runway rectangle */}
-        <rect x="50" y="10" width="20" height="100" fill="#555" rx="3" />
+        <rect x="50" y="20" width="20" height="80" fill="#555" rx="3" />
 
-        {/* Runway number (dynamic) */}
+        {/* Runway number */}
         <text
           x="60"
-          y="115"
-          fontSize="12"
+          y="110"
+          fontSize="10"
           fill="white"
           textAnchor="middle"
-          alignmentBaseline="middle"
           fontWeight="bold"
         >
           {runway}
@@ -361,14 +353,13 @@ function CrosswindVisual({ wind, runway }) {
         <line
           x1="60"
           y1="60"
-          x2={60 + 40 * Math.sin(angleRad)}
-          y2={60 - 40 * Math.cos(angleRad)}
-          stroke="red"
+          x2={60 + 30 * Math.sin(angleRad)}
+          y2={60 - 30 * Math.cos(angleRad)}
+          stroke="green"
           strokeWidth="3"
           markerEnd="url(#arrowhead)"
         />
 
-        {/* Arrowhead definition */}
         <defs>
           <marker
             id="arrowhead"
@@ -378,18 +369,18 @@ function CrosswindVisual({ wind, runway }) {
             refY="3"
             orient="auto"
           >
-            <polygon points="0 0, 6 3, 0 6" fill="red" />
+            <polygon points="0 0, 6 3, 0 6" fill="green" />
           </marker>
         </defs>
       </svg>
 
       {/* Labels */}
-      <p>Wind: {wind}</p>
-      <p>Headwind: {headwind} KT</p>
-      <p className={crosswindClass}>Crosswind: {crosswind} KT</p>
+      <p className="text-white">XW: {crosswind} KT</p>
+      <p className="text-white">HW: {headwind} KT</p>
     </div>
   );
 }
+
 export default function Dashboard() {
   const ICAO = "KMGM";
 
@@ -543,10 +534,17 @@ export default function Dashboard() {
       <header className="flex flex-col items-center mb-4 text-center relative">
   {/* Logo top-left */}
   <img
-    src="/0187 Operations Support Squadron_(2024-08-16).png"
+    src="/oss-patch.png"
     alt="187th OSS Patch"
     className="absolute top-0 left-0 w-20 h-20 md:w-28 md:h-28 object-contain m-2"
   />
+
+  <h1 className="text-xl font-bold">
+    187th Operations Support Squadron — {ICAO} Dannelly Field
+  </h1>
+  <p className="text-lg font-semibold">Airfield Dashboard</p>
+  ...
+</header>
 
   <h1 className="text-xl font-bold">
     187th Operations Support Squadron — {ICAO} Dannelly Field
@@ -794,7 +792,7 @@ export default function Dashboard() {
         </section>
 
         {/* Weather */}
-<section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
+<section className="relative border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
   <div className="flex items-center gap-2 mb-2">
     <h2 className="text-lg font-bold underline">WEATHER</h2>
     <span
@@ -817,22 +815,7 @@ export default function Dashboard() {
     )}
   </div>
 
-  {crosswind && (
-    <div className="mb-2">
-      <p className="font-semibold">
-        Crosswind (Runway {airfield.activeRunway})
-      </p>
-      <span
-        className={`px-3 py-1 rounded ${
-          crosswind.warning ? "bg-red-600" : "bg-green-600"
-        }`}
-      >
-        {crosswind.crosswind} KT {crosswind.warning && "⚠"}
-      </span>
-    </div>
-  )}
-
-  {/* Crosswind visual diagram */}
+  {/* Crosswind diagram (mini, top-right) */}
   <CrosswindVisual wind={parsed.wind} runway={airfield.activeRunway} />
 
   <div className="grid grid-cols-2 gap-2 text-sm mb-2 mt-2">
