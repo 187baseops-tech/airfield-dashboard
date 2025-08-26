@@ -31,3 +31,7 @@ Thumbs.db
 
 # VSCode
 .vscode/
+"/public/*.png" 
+"/public/*.jpg" 
+"/public/*.jpeg" 
+"/public/*.gif" 
