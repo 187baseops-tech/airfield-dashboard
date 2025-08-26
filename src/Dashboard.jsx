@@ -1,5 +1,17 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import {
+  Stage,
+  Layer,
+  Rect,
+  Line,
+  Text as KText,
+  Transformer,
+  Group,
+  Label,
+  Tag,
+} from "react-konva";
+import { v4 as uuidv4 } from "uuid";
 
 // --- Helpers ---
 function highlightTaf(rawTaf) {
@@ -76,19 +88,6 @@ function computeFits(tempC, dewC) {
   return { level, wbgt: Math.round(wbgt) };
 }
 // --- SlidesCard ---
-import {
-  Stage,
-  Layer,
-  Rect,
-  Line,
-  Text as KText,
-  Transformer,
-  Group,
-  Label,
-  Tag,
-} from "react-konva";
-import { v4 as uuidv4 } from "uuid";
-
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
