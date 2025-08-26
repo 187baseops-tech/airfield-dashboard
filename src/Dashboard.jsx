@@ -111,20 +111,15 @@ function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [annotations, setAnnotations] = useState({});
-  const [tool, setTool] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [selectedId, setSelectedId] = useState(null);
-  const [drawing, setDrawing] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [imageObj, setImageObj] = useState(null);
-  const trRef = useRef();
+  const containerRef = useRef();
+  const [stageSize, setStageSize] = useState({ width: 800, height: 400 });
 
   const API =
-    (typeof process !== "undefined" && process.env?.REACT_APP_API_URL)
-      ? process.env.REACT_APP_API_URL
-      : "https://one87oss-airfield-dashboard.onrender.com";
+    process.env?.REACT_APP_API_URL || "https://airfield-dashboard.onrender.com";
 
-  // Load slides list + annotations
   useEffect(() => {
     axios.get(`${API}/api/slides`).then((res) => setSlides(res.data));
     axios.get(`${API}/api/annotations`).then((res) =>
@@ -132,7 +127,6 @@ function SlidesCard() {
     );
   }, [API]);
 
-  // Load current slide image
   useEffect(() => {
     if (!slides[currentSlide]) return;
     const img = new window.Image();
@@ -140,7 +134,6 @@ function SlidesCard() {
     img.onload = () => setImageObj(img);
   }, [slides, currentSlide]);
 
-  // Slideshow play
   useEffect(() => {
     if (isPlaying && slides.length > 0) {
       const interval = setInterval(
@@ -151,62 +144,15 @@ function SlidesCard() {
     }
   }, [isPlaying, slides.length]);
 
-  const saveAnnotations = (updated) => {
-    setAnnotations(updated);
-    axios.post(`${API}/api/annotations`, { slides: updated });
-  };
-
-  const addAnnotation = (annot) => {
-    const file = slides[currentSlide];
-    if (!file) return;
-    const slideKey = file;
-    const annots = { ...annotations };
-    if (!annots[slideKey]) annots[slideKey] = [];
-    annots[slideKey].push({ _id: uuidv4(), ...annot });
-    saveAnnotations(annots);
-  };
-
-  const updateAnnotation = (id, newAttrs) => {
-    const file = slides[currentSlide];
-    if (!file) return;
-    const slideKey = file;
-    const annots = { ...annotations };
-    annots[slideKey] = annots[slideKey].map((a) =>
-      a._id === id ? { ...a, ...newAttrs } : a
-    );
-    saveAnnotations(annots);
-  };
-
-  const deleteAnnotation = (id) => {
-    const file = slides[currentSlide];
-    if (!file) return;
-    const slideKey = file;
-    const annots = { ...annotations };
-    annots[slideKey] = annots[slideKey].filter((a) => a._id !== id);
-    saveAnnotations(annots);
-    setSelectedId(null);
-    trRef.current?.nodes([]);
-  };
-
-  const clearAllAnnotations = () => {
-    const file = slides[currentSlide];
-    if (!file) return;
-    const slideKey = file;
-    const annots = { ...annotations, [slideKey]: [] };
-    saveAnnotations(annots);
-    setSelectedId(null);
-    trRef.current?.nodes([]);
-  };
-
   useEffect(() => {
-    if (trRef.current && selectedId) {
-      const shape = trRef.current.getStage().findOne(`#${selectedId}`);
-      if (shape) {
-        trRef.current.nodes([shape]);
-        trRef.current.getLayer().batchDraw();
-      }
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setStageSize({
+        width: rect.width,
+        height: isFullscreen ? window.innerHeight - 50 : rect.height,
+      });
     }
-  }, [selectedId, annotations]);
+  }, [isFullscreen, slides, currentSlide]);
 
   if (slides.length === 0) {
     return (
@@ -220,196 +166,134 @@ function SlidesCard() {
   const file = slides[currentSlide];
   const slideKey = file || "unknown";
 
-  const SlideContainer = ({ children }) =>
-    isFullscreen ? (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col">
-        <div className="flex justify-between p-2 bg-slate-900 text-white relative z-50">
-          <button
-            onClick={() => setIsFullscreen(false)}
-            className="px-3 py-1 bg-red-600 rounded"
-          >
-            ✖ Close
-          </button>
-          <button
-            onClick={() => clearAllAnnotations()}
-            className="px-3 py-1 bg-yellow-600 rounded"
-          >
-            🧹 Clear All
-          </button>
-        </div>
-        <div className="flex-1 flex items-center justify-center overflow-auto">
-          {children}
-        </div>
-      </div>
-    ) : (
-      <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[400px]">
-        {children}
-      </div>
+  let drawW = 0,
+    drawH = 0,
+    offsetX = 0,
+    offsetY = 0,
+    scale = 1;
+  if (imageObj) {
+    scale = Math.min(
+      stageSize.width / imageObj.width,
+      stageSize.height / imageObj.height
     );
+    drawW = imageObj.width * scale;
+    drawH = imageObj.height * scale;
+    offsetX = (stageSize.width - drawW) / 2;
+    offsetY = (stageSize.height - drawH) / 2;
+  }
 
   return (
     <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
       <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
 
       {file && imageObj ? (
-        <SlideContainer>
-          <Stage
-            width={isFullscreen ? window.innerWidth : 800}
-            height={
-              isFullscreen ? window.innerHeight - 50 : (imageObj.height * 800) / imageObj.width
-            }
-            className="absolute inset-0 w-full h-full"
-            onMouseDown={(e) => {
-              if (!tool || e.target !== e.target.getStage()) return;
-              const pos = e.target.getStage().getPointerPosition();
-              if (!pos) return;
-
-              if (tool === "box") {
-                setDrawing({ type: "box", x: pos.x, y: pos.y, w: 0, h: 0 });
-              } else if (tool === "arrow") {
-                setDrawing({ type: "arrow", x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
-              } else if (tool === "x") {
-                addAnnotation({ type: "x", x: pos.x, y: pos.y });
-              } else if (tool === "text") {
-                const text = prompt("Enter note:");
-                if (text) addAnnotation({ type: "text", x: pos.x, y: pos.y, text });
-              }
-            }}
-            onMouseMove={(e) => {
-              if (!drawing) return;
-              const pos = e.target.getStage().getPointerPosition();
-              if (!pos) return;
-              if (drawing.type === "box") {
-                setDrawing({ ...drawing, w: pos.x - drawing.x, h: pos.y - drawing.y });
-              } else if (drawing.type === "arrow") {
-                setDrawing({ ...drawing, x2: pos.x, y2: pos.y });
-              }
-            }}
-            onMouseUp={() => {
-              if (drawing) {
-                addAnnotation(drawing);
-                setDrawing(null);
-              }
-            }}
-          >
+        <div
+          ref={containerRef}
+          className="relative flex-1 bg-slate-900 rounded overflow-hidden h-[400px]"
+        >
+          <Stage width={stageSize.width} height={stageSize.height}>
             <Layer>
-              {/* Background slide image */}
-              <KonvaImage image={imageObj} x={0} y={0} width={800} height={(imageObj.height * 800) / imageObj.width} listening={false} />
-
-              {/* Existing annotations */}
+              <KonvaImage
+                image={imageObj}
+                x={offsetX}
+                y={offsetY}
+                width={drawW}
+                height={drawH}
+                listening={false}
+              />
               {annotations[slideKey]?.map((a) => {
-                const commonProps = {
-                  key: a._id,
-                  id: a._id,
-                  draggable: true,
-                  onClick: () => setSelectedId(a._id),
-                  onTap: () => setSelectedId(a._id),
-                  onDragEnd: (e) =>
-                    updateAnnotation(a._id, {
-                      x: e.target.x(),
-                      y: e.target.y(),
-                    }),
-                };
-
-                let shape;
-                if (a.type === "box") {
-                  shape = <Rect {...commonProps} x={a.x} y={a.y} width={a.w} height={a.h} stroke="red" />;
-                } else if (a.type === "x") {
-                  shape = <KText {...commonProps} x={a.x} y={a.y} text="X" fontSize={32} fill="red" fontStyle="bold" />;
-                } else if (a.type === "arrow") {
-                  shape = (
-                    <Arrow
-                      {...commonProps}
-                      points={[a.x1, a.y1, a.x2, a.y2]}
-                      stroke="green"
-                      strokeWidth={4}
-                      pointerLength={10}
-                      pointerWidth={10}
+                if (a.type === "box")
+                  return (
+                    <Rect
+                      key={a._id}
+                      x={offsetX + a.x * scale}
+                      y={offsetY + a.y * scale}
+                      width={a.w * scale}
+                      height={a.h * scale}
+                      stroke="red"
                     />
                   );
-                } else if (a.type === "text") {
-                  shape = (
+                if (a.type === "x")
+                  return (
                     <KText
-                      {...commonProps}
-                      x={a.x}
-                      y={a.y}
+                      key={a._id}
+                      x={offsetX + a.x * scale}
+                      y={offsetY + a.y * scale}
+                      text="X"
+                      fontSize={32 * scale}
+                      fill="red"
+                    />
+                  );
+                if (a.type === "arrow")
+                  return (
+                    <Arrow
+                      key={a._id}
+                      points={[
+                        offsetX + a.x1 * scale,
+                        offsetY + a.y1 * scale,
+                        offsetX + a.x2 * scale,
+                        offsetY + a.y2 * scale,
+                      ]}
+                      stroke="green"
+                      strokeWidth={4 * scale}
+                      pointerLength={10 * scale}
+                      pointerWidth={10 * scale}
+                    />
+                  );
+                if (a.type === "text")
+                  return (
+                    <KText
+                      key={a._id}
+                      x={offsetX + a.x * scale}
+                      y={offsetY + a.y * scale}
                       text={a.text}
-                      fontSize={16}
+                      fontSize={16 * scale}
                       fill="white"
                     />
                   );
-                }
-
-                return (
-                  <Group key={a._id}>
-                    {shape}
-                    {selectedId === a._id && (
-                      <Label x={(a.x || a.x1 || 0) + 10} y={(a.y || a.y1 || 0) - 20} onClick={() => deleteAnnotation(a._id)}>
-                        <Tag fill="red" pointerDirection="up" />
-                        <KText text="❌" fontSize={16} fill="white" padding={2} />
-                      </Label>
-                    )}
-                  </Group>
-                );
+                return null;
               })}
-
-              {/* Temporary drawing preview */}
-              {drawing?.type === "box" && (
-                <Rect x={drawing.x} y={drawing.y} width={drawing.w} height={drawing.h} stroke="red" dash={[4, 4]} />
-              )}
-              {drawing?.type === "arrow" && (
-                <Arrow
-                  points={[drawing.x1, drawing.y1, drawing.x2, drawing.y2]}
-                  stroke="green"
-                  strokeWidth={4}
-                  pointerLength={10}
-                  pointerWidth={10}
-                  dash={[4, 4]}
-                />
-              )}
-
-              <Transformer ref={trRef} rotateEnabled={true} resizeEnabled={true} />
             </Layer>
           </Stage>
-        </SlideContainer>
+        </div>
       ) : (
         <p className="text-slate-400">No slide selected.</p>
       )}
 
-      {/* Controls */}
+      {/* Toolbar */}
       <div className="flex flex-wrap justify-center gap-2 mt-3">
-        <button onClick={() => setCurrentSlide((s) => (s - 1 + slides.length) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">
+        <button
+          onClick={() =>
+            setCurrentSlide((s) => (s - 1 + slides.length) % slides.length)
+          }
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
           ⏮ Prev
         </button>
-        <button onClick={() => setCurrentSlide((s) => (s + 1) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">
+        <button
+          onClick={() => setCurrentSlide((s) => (s + 1) % slides.length)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
           ⏭ Next
         </button>
-        <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-slate-700 rounded">
+        <button
+          onClick={() => setIsPlaying(!isPlaying)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
           {isPlaying ? "⏸ Pause" : "▶ Play"}
         </button>
-        <button onClick={() => setIsFullscreen(true)} className="px-3 py-1 bg-slate-700 rounded">
+        <button
+          onClick={() => setIsFullscreen(true)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
           ⛶ Enlarge
-        </button>
-      </div>
-
-      {/* Annotation Tools */}
-      <div className="flex flex-wrap justify-center gap-2 mt-2">
-        <button onClick={() => setTool("x")} className={`px-3 py-1 rounded ${tool === "x" ? "bg-blue-600" : "bg-slate-700"}`}>
-          ❌ X
-        </button>
-        <button onClick={() => setTool("box")} className={`px-3 py-1 rounded ${tool === "box" ? "bg-blue-600" : "bg-slate-700"}`}>
-          ⬛ Box
-        </button>
-        <button onClick={() => setTool("arrow")} className={`px-3 py-1 rounded ${tool === "arrow" ? "bg-blue-600" : "bg-slate-700"}`}>
-          ➡️ Arrow
-        </button>
-        <button onClick={() => setTool("text")} className={`px-3 py-1 rounded ${tool === "text" ? "bg-blue-600" : "bg-slate-700"}`}>
-          📝 Text
         </button>
       </div>
     </section>
   );
 }
+
+
 
 // --- Main Dashboard ---
 function CrosswindVisual({ wind, runway }) {
