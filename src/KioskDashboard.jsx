@@ -6,11 +6,7 @@ import {
   Rect,
   Arrow,
   Text as KText,
-  Group,
-  Label,
-  Tag,
   Image as KonvaImage,
-  Transformer,
 } from "react-konva";
 
 // --- Helpers ---
@@ -83,7 +79,7 @@ function computeFits(tempC) {
   return { level, tempF: Math.round(tempF) };
 }
 
-// --- SlidesCard (read-only annotations) ---
+// --- SlidesCard (read-only) ---
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -98,7 +94,6 @@ function SlidesCard() {
       ? process.env.REACT_APP_API_URL
       : "https://airfield-dashboard.onrender.com";
 
-  // Load slides list + annotations
   useEffect(() => {
     axios.get(`${API}/api/slides`).then((res) => setSlides(res.data));
     axios.get(`${API}/api/annotations`).then((res) =>
@@ -106,7 +101,6 @@ function SlidesCard() {
     );
   }, [API]);
 
-  // Load current slide image
   useEffect(() => {
     if (!slides[currentSlide]) return;
     const img = new window.Image();
@@ -114,7 +108,6 @@ function SlidesCard() {
     img.onload = () => setImageObj(img);
   }, [slides, currentSlide]);
 
-  // Slideshow play
   useEffect(() => {
     if (isPlaying && slides.length > 0) {
       const interval = setInterval(
@@ -182,12 +175,12 @@ function SlidesCard() {
                 listening={false}
               />
 
-              {/* Existing annotations (read-only) */}
+              {/* Existing annotations only */}
               {annotations[slideKey]?.map((a) => {
                 if (a.type === "box") {
                   return <Rect key={a._id} x={a.x} y={a.y} width={a.w} height={a.h} stroke="red" />;
                 } else if (a.type === "x") {
-                  return <KText key={a._id} x={a.x} y={a.y} text="X" fontSize={32} fill="red" fontStyle="bold" />;
+                  return <KText key={a._id} x={a.x} y={a.y} text="X" fontSize={32} fill="red" />;
                 } else if (a.type === "arrow") {
                   return (
                     <Arrow
@@ -213,7 +206,6 @@ function SlidesCard() {
                 }
                 return null;
               })}
-              <Transformer ref={trRef} rotateEnabled={false} resizeEnabled={false} enabledAnchors={[]} />
             </Layer>
           </Stage>
         </SlideContainer>
