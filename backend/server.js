@@ -65,27 +65,35 @@ async function fetchNotams(icao = "KMGM") {
     const notams = [];
     const lines = html.split("\n");
 
-    // Look line by line for NOTAM-like patterns
+    let currentNotam = null;
+
     for (const line of lines) {
       const text = line.trim();
       if (!text) continue;
 
-      // Only grab lines that look like NOTAMs
+      // If this line looks like the start of a NOTAM
       if (/^(NOTAM|M\d{3,4}\/\d{2}|!\w{3}|FDC)/.test(text)) {
-        const cleaned = text
-          .replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)")
-          .replace(/\s?NOTAMN/g, "")
-          .trim();
+        // If we were already building one, push it
+        if (currentNotam) {
+          notams.push(currentNotam);
+        }
 
-        // Extract NOTAM ID
-        const match = cleaned.match(
+        // Start a new NOTAM
+        const match = text.match(
           /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
         );
-        const id = match ? match[0] : cleaned.slice(0, 20);
+        const id = match ? match[0] : text.slice(0, 20);
 
-        notams.push({ id, text: cleaned });
+        currentNotam = { id, text };
+      }
+      // Otherwise, if we're inside a NOTAM, append details
+      else if (currentNotam) {
+        currentNotam.text += "\n" + text;
       }
     }
+
+    // Push the last NOTAM if any
+    if (currentNotam) notams.push(currentNotam);
 
     console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
     return notams;
