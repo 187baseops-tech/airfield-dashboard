@@ -1,4 +1,4 @@
-import express from "express"; 
+import express from "express";
 import axios from "axios";
 import * as cheerio from "cheerio";
 import cors from "cors";
@@ -15,7 +15,7 @@ app.use(express.json());
 // ---- Persistent State ----
 const STATE_FILE = "./state.json";
 let savedState = {
-  navaids: { mgm: "IN", mxf: "IN", ils10: "IN", ils28: "OUT" },
+  navaids: { mgm: "IN", mxf: "IN", ils10: "IN", ils28: "IN" },
   bash: {
     KMGM: "LOW",
     KMXF: "LOW",
@@ -63,25 +63,21 @@ async function fetchNotams(icao = "KMGM") {
     );
 
     const $ = cheerio.load(html);
-    let notams = [];
+    const notams = [];
 
-    // --- Primary Parse: <section id="notam-...">
     $("section[id^=notam-]").each((_, el) => {
       const header = $(el).find("h3").text().trim();
       const body = $(el).find("p.notam").text().trim();
       if (!header || !body) return;
 
-      // Extract NOTAM ID
       const match = header.match(
         /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
       );
       const id = match ? match[0] : header.slice(0, 20);
 
-      // Always append ICAO (KMGM)
       const locMatch = header.match(/\(KMGM\)/);
       const location = locMatch ? " (KMGM)" : "";
 
-      // Clean body lines
       const lines = body.split("\n").map((l) => l.trim());
       const cleanedLines = [];
       for (const line of lines) {
@@ -102,51 +98,32 @@ async function fetchNotams(icao = "KMGM") {
       });
     });
 
-    // --- Fallback Parse: Regex if no NOTAMs found
-    if (notams.length === 0) {
-      console.warn("⚠️ Section parse failed, falling back to regex mode...");
-      const lines = html.split("\n");
-      let currentNotam = null;
+    // 🔹 Detect Navaid outages from NOTAMs
+    const outageKeywords = ["U/S", "UNSERVICEABLE", "OUT OF SERVICE"];
+    const navaidOutages = { mgm: "IN", ils10: "IN", ils28: "IN" };
 
-      for (const line of lines) {
-        const text = line.trim();
-        if (!text) continue;
-
-        if (/^(NOTAM|M\d{3,4}\/\d{2}|!\w{3}|FDC)/.test(text)) {
-          if (currentNotam) notams.push(currentNotam);
-
-          const match = text.match(
-            /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
-          );
-          const id = match ? match[0] : text.slice(0, 20);
-
-          currentNotam = { id, text };
-        } else if (currentNotam) {
-          if (!text.startsWith("CREATED:") && !text.startsWith("SOURCE:")) {
-            currentNotam.text += "\n" + text;
-          }
+    for (const n of notams) {
+      const t = n.text.toUpperCase();
+      if (outageKeywords.some((w) => t.includes(w))) {
+        if (t.includes("ILS 10")) navaidOutages.ils10 = "OUT";
+        if (t.includes("ILS 28")) navaidOutages.ils28 = "OUT";
+        if (t.includes("MGM TACAN") || (t.includes("MGM") && t.includes("TACAN"))) {
+          navaidOutages.mgm = "OUT";
         }
       }
-      if (currentNotam) notams.push(currentNotam);
     }
 
-    // --- Sort by Criticality
-    const score = (n) => {
-      const t = n.text.toUpperCase();
-      if (t.includes("CLSD") || t.includes("U/S") || t.includes("UNSERVICEABLE") || t.includes("OUT OF SERVICE")) return 1;
-      if (t.includes("OBST") || t.includes("OBSTACLE") || t.includes("CRANE") || t.includes("TOWER")) return 2;
-      return 3;
-    };
-    notams.sort((a, b) => score(a) - score(b));
+    // 🔹 Merge with saved state (manual toggles still possible)
+    savedState.navaids = { ...savedState.navaids, ...navaidOutages };
+    saveState();
 
-    console.log(`✅ Returning ${notams.length} NOTAMs for ${icao}`);
+    console.log(`✅ Found ${notams.length} NOTAMs, applied navaid outages:`, navaidOutages);
     return notams;
   } catch (err) {
     console.error("❌ NOTAM scrape failed:", err.message);
     return [];
   }
 }
-
 
 // ---- Routes ----
 app.get("/", (req, res) => res.send("✅ Airfield Dashboard Backend running"));
@@ -178,21 +155,14 @@ app.post("/api/state", (req, res) => {
 
 // NAVAIDs + BASH helpers
 app.get("/api/navaids", (req, res) => res.json(savedState.navaids));
-
 app.post("/api/navaids", (req, res) => {
   const { name } = req.body;
-  if (!name || !Object.prototype.hasOwnProperty.call(savedState.navaids, name)) {
-    return res.status(400).json({ ok: false, error: "Invalid NAVAID name" });
+  if (name && savedState.navaids[name] !== undefined) {
+    savedState.navaids[name] = savedState.navaids[name] === "IN" ? "OUT" : "IN";
+    saveState();
   }
-
-  // Cycle IN ↔ OUT
-  savedState.navaids[name] =
-    savedState.navaids[name] === "IN" ? "OUT" : "IN";
-
-  saveState();
-  res.json({ ok: true, navaids: savedState.navaids });
+  res.json({ navaids: savedState.navaids });
 });
-
 app.get("/api/bash", (req, res) => res.json(savedState.bash));
 
 // Slides + Annotations
@@ -200,19 +170,9 @@ app.use("/slides", express.static(SLIDES_DIR));
 
 app.get("/api/slides", (req, res) => {
   try {
-    console.log("📂 Checking slide directory:", SLIDES_DIR);
-
-    if (!fs.existsSync(SLIDES_DIR)) {
-      console.log("❌ Slides directory not found");
-      return res.json([]);
-    }
-
+    if (!fs.existsSync(SLIDES_DIR)) return res.json([]);
     const files = fs.readdirSync(SLIDES_DIR);
-    console.log("📂 Files found in slides dir:", files);
-
     const images = files.filter((f) => /\.(png|jpg|jpeg)$/i.test(f));
-    console.log("🖼️ Returning images:", images);
-
     res.json(images);
   } catch (err) {
     console.error("❌ Failed to read slides:", err.message);
