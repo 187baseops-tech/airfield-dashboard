@@ -111,7 +111,9 @@ function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [annotations, setAnnotations] = useState({});
+  const [tool, setTool] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [drawing, setDrawing] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [imageObj, setImageObj] = useState(null);
   const containerRef = useRef();
@@ -120,6 +122,7 @@ function SlidesCard() {
   const API =
     process.env?.REACT_APP_API_URL || "https://airfield-dashboard.onrender.com";
 
+  // load slides + annotations
   useEffect(() => {
     axios.get(`${API}/api/slides`).then((res) => setSlides(res.data));
     axios.get(`${API}/api/annotations`).then((res) =>
@@ -127,13 +130,26 @@ function SlidesCard() {
     );
   }, [API]);
 
+  // load current image
   useEffect(() => {
     if (!slides[currentSlide]) return;
     const img = new window.Image();
     img.src = `${API}/slides/${slides[currentSlide]}`;
-    img.onload = () => setImageObj(img);
-  }, [slides, currentSlide]);
+    img.onload = () => {
+      setImageObj(img);
+      setTimeout(() => {
+        if (containerRef.current) {
+          const rect = containerRef.current.getBoundingClientRect();
+          setStageSize({
+            width: rect.width,
+            height: isFullscreen ? window.innerHeight - 50 : rect.height,
+          });
+        }
+      }, 50);
+    };
+  }, [slides, currentSlide, isFullscreen]);
 
+  // slideshow autoplay
   useEffect(() => {
     if (isPlaying && slides.length > 0) {
       const interval = setInterval(
@@ -144,15 +160,36 @@ function SlidesCard() {
     }
   }, [isPlaying, slides.length]);
 
-  useEffect(() => {
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      setStageSize({
-        width: rect.width,
-        height: isFullscreen ? window.innerHeight - 50 : rect.height,
-      });
-    }
-  }, [isFullscreen, slides, currentSlide]);
+  const saveAnnotations = (updated) => {
+    setAnnotations(updated);
+    axios.post(`${API}/api/annotations`, { slides: updated });
+  };
+
+  const addAnnotation = (annot) => {
+    const file = slides[currentSlide];
+    if (!file) return;
+    const annots = { ...annotations };
+    if (!annots[file]) annots[file] = [];
+    annots[file].push({ _id: uuidv4(), ...annot });
+    saveAnnotations(annots);
+  };
+
+  const updateAnnotation = (id, newAttrs) => {
+    const file = slides[currentSlide];
+    if (!file) return;
+    const annots = { ...annotations };
+    annots[file] = annots[file].map((a) =>
+      a._id === id ? { ...a, ...newAttrs } : a
+    );
+    saveAnnotations(annots);
+  };
+
+  const clearAllAnnotations = () => {
+    const file = slides[currentSlide];
+    if (!file) return;
+    const annots = { ...annotations, [file]: [] };
+    saveAnnotations(annots);
+  };
 
   if (slides.length === 0) {
     return (
@@ -182,6 +219,14 @@ function SlidesCard() {
     offsetY = (stageSize.height - drawH) / 2;
   }
 
+  // migration helper
+  const migrate = (val, axis = "x") => {
+    if (!imageObj) return val;
+    return val < (axis === "x" ? imageObj.width : imageObj.height)
+      ? val
+      : (val - (axis === "x" ? offsetX : offsetY)) / scale;
+  };
+
   return (
     <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
       <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
@@ -191,7 +236,49 @@ function SlidesCard() {
           ref={containerRef}
           className="relative flex-1 bg-slate-900 rounded overflow-hidden h-[400px]"
         >
-          <Stage width={stageSize.width} height={stageSize.height}>
+          <Stage
+            width={stageSize.width}
+            height={stageSize.height}
+            onMouseDown={(e) => {
+              if (!tool || e.target !== e.target.getStage()) return;
+              const pos = e.target.getStage().getPointerPosition();
+              if (!pos) return;
+
+              const imgX = (pos.x - offsetX) / scale;
+              const imgY = (pos.y - offsetY) / scale;
+
+              if (tool === "box") {
+                setDrawing({ type: "box", x: imgX, y: imgY, w: 0, h: 0 });
+              } else if (tool === "arrow") {
+                setDrawing({ type: "arrow", x1: imgX, y1: imgY, x2: imgX, y2: imgY });
+              } else if (tool === "x") {
+                addAnnotation({ type: "x", x: imgX, y: imgY });
+              } else if (tool === "text") {
+                const text = prompt("Enter note:");
+                if (text) addAnnotation({ type: "text", x: imgX, y: imgY, text });
+              }
+            }}
+            onMouseMove={(e) => {
+              if (!drawing) return;
+              const pos = e.target.getStage().getPointerPosition();
+              if (!pos) return;
+
+              const imgX = (pos.x - offsetX) / scale;
+              const imgY = (pos.y - offsetY) / scale;
+
+              if (drawing.type === "box") {
+                setDrawing({ ...drawing, w: imgX - drawing.x, h: imgY - drawing.y });
+              } else if (drawing.type === "arrow") {
+                setDrawing({ ...drawing, x2: imgX, y2: imgY });
+              }
+            }}
+            onMouseUp={() => {
+              if (drawing) {
+                addAnnotation(drawing);
+                setDrawing(null);
+              }
+            }}
+          >
             <Layer>
               <KonvaImage
                 image={imageObj}
@@ -201,13 +288,17 @@ function SlidesCard() {
                 height={drawH}
                 listening={false}
               />
+
               {annotations[slideKey]?.map((a) => {
+                const ax = migrate(a.x, "x");
+                const ay = migrate(a.y, "y");
+
                 if (a.type === "box")
                   return (
                     <Rect
                       key={a._id}
-                      x={offsetX + a.x * scale}
-                      y={offsetY + a.y * scale}
+                      x={offsetX + ax * scale}
+                      y={offsetY + ay * scale}
                       width={a.w * scale}
                       height={a.h * scale}
                       stroke="red"
@@ -217,8 +308,8 @@ function SlidesCard() {
                   return (
                     <KText
                       key={a._id}
-                      x={offsetX + a.x * scale}
-                      y={offsetY + a.y * scale}
+                      x={offsetX + ax * scale}
+                      y={offsetY + ay * scale}
                       text="X"
                       fontSize={32 * scale}
                       fill="red"
@@ -229,10 +320,10 @@ function SlidesCard() {
                     <Arrow
                       key={a._id}
                       points={[
-                        offsetX + a.x1 * scale,
-                        offsetY + a.y1 * scale,
-                        offsetX + a.x2 * scale,
-                        offsetY + a.y2 * scale,
+                        offsetX + migrate(a.x1, "x") * scale,
+                        offsetY + migrate(a.y1, "y") * scale,
+                        offsetX + migrate(a.x2, "x") * scale,
+                        offsetY + migrate(a.y2, "y") * scale,
                       ]}
                       stroke="green"
                       strokeWidth={4 * scale}
@@ -244,8 +335,8 @@ function SlidesCard() {
                   return (
                     <KText
                       key={a._id}
-                      x={offsetX + a.x * scale}
-                      y={offsetY + a.y * scale}
+                      x={offsetX + ax * scale}
+                      y={offsetY + ay * scale}
                       text={a.text}
                       fontSize={16 * scale}
                       fill="white"
@@ -262,32 +353,19 @@ function SlidesCard() {
 
       {/* Toolbar */}
       <div className="flex flex-wrap justify-center gap-2 mt-3">
-        <button
-          onClick={() =>
-            setCurrentSlide((s) => (s - 1 + slides.length) % slides.length)
-          }
-          className="px-3 py-1 bg-slate-700 rounded"
-        >
-          ⏮ Prev
-        </button>
-        <button
-          onClick={() => setCurrentSlide((s) => (s + 1) % slides.length)}
-          className="px-3 py-1 bg-slate-700 rounded"
-        >
-          ⏭ Next
-        </button>
-        <button
-          onClick={() => setIsPlaying(!isPlaying)}
-          className="px-3 py-1 bg-slate-700 rounded"
-        >
-          {isPlaying ? "⏸ Pause" : "▶ Play"}
-        </button>
-        <button
-          onClick={() => setIsFullscreen(true)}
-          className="px-3 py-1 bg-slate-700 rounded"
-        >
-          ⛶ Enlarge
-        </button>
+        <button onClick={() => setCurrentSlide((s) => (s - 1 + slides.length) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">⏮ Prev</button>
+        <button onClick={() => setCurrentSlide((s) => (s + 1) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">⏭ Next</button>
+        <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-slate-700 rounded">{isPlaying ? "⏸ Pause" : "▶ Play"}</button>
+        <button onClick={() => setIsFullscreen(true)} className="px-3 py-1 bg-slate-700 rounded">⛶ Enlarge</button>
+        <button onClick={clearAllAnnotations} className="px-3 py-1 bg-yellow-600 rounded">🧹 Clear All</button>
+      </div>
+
+      {/* Tools */}
+      <div className="flex flex-wrap justify-center gap-2 mt-2">
+        <button onClick={() => setTool("x")} className={`px-3 py-1 rounded ${tool === "x" ? "bg-blue-600" : "bg-slate-700"}`}>❌ X</button>
+        <button onClick={() => setTool("box")} className={`px-3 py-1 rounded ${tool === "box" ? "bg-blue-600" : "bg-slate-700"}`}>⬛ Box</button>
+        <button onClick={() => setTool("arrow")} className={`px-3 py-1 rounded ${tool === "arrow" ? "bg-blue-600" : "bg-slate-700"}`}>➡️ Arrow</button>
+        <button onClick={() => setTool("text")} className={`px-3 py-1 rounded ${tool === "text" ? "bg-blue-600" : "bg-slate-700"}`}>📝 Text</button>
       </div>
     </section>
   );
