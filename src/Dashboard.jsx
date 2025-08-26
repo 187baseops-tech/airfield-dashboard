@@ -90,7 +90,7 @@ function SlidesCard() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [drawing, setDrawing] = useState(null);
-  const [zoom, setZoom] = useState(1); // enlarge toggle
+  const [isFullscreen, setIsFullscreen] = useState(false); // NEW fullscreen toggle
   const trRef = useRef();
 
   const API =
@@ -148,10 +148,8 @@ function SlidesCard() {
     annots[slideKey] = annots[slideKey].filter((a) => a._id !== id);
     saveAnnotations(annots);
     setSelectedId(null);
-
-    // clear transformer box
     if (trRef.current) {
-      trRef.current.nodes([]);
+      trRef.current.nodes([]); // clear transformer
       trRef.current.getLayer().batchDraw();
     }
   };
@@ -160,14 +158,12 @@ function SlidesCard() {
     const file = slides[currentSlide];
     if (!file) return;
     const slideKey = file;
-    const annots = { ...annotations, [slideKey]: [] };
-    saveAnnotations(annots);
-
+    saveAnnotations({ ...annotations, [slideKey]: [] });
+    setSelectedId(null);
     if (trRef.current) {
       trRef.current.nodes([]);
       trRef.current.getLayer().batchDraw();
     }
-    setSelectedId(null);
   };
 
   useEffect(() => {
@@ -191,37 +187,57 @@ function SlidesCard() {
 
   const file = slides[currentSlide] || null;
   const slideKey = file || "unknown";
-  const stageWidth = 800 * zoom;
-  const stageHeight = 400 * zoom;
+
+  const SlideContainer = ({ children }) =>
+    isFullscreen ? (
+      <div className="fixed inset-0 z-50 bg-black flex flex-col">
+        <div className="flex justify-between items-center p-2 bg-slate-800">
+          <h2 className="text-lg font-bold text-white">Airfield Slides</h2>
+          <button
+            onClick={() => setIsFullscreen(false)}
+            className="px-3 py-1 bg-red-600 rounded"
+          >
+            ✖ Close
+          </button>
+        </div>
+        <div className="flex-1 flex items-center justify-center">{children}</div>
+      </div>
+    ) : (
+      <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[400px]">
+        {children}
+      </div>
+    );
 
   return (
     <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
       <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
 
       {file ? (
-        <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden">
+        <SlideContainer>
           <img
             src={`${API}/slides/${file}`}
             alt="Slide"
-            style={{
-              transform: `scale(${zoom})`,
-              transformOrigin: "center center",
-              maxHeight: "100%",
-              maxWidth: "100%",
-            }}
+            className="object-contain max-h-full max-w-full"
           />
           <Stage
-            width={stageWidth}
-            height={stageHeight}
+            width={isFullscreen ? window.innerWidth : 800}
+            height={isFullscreen ? window.innerHeight - 60 : 400}
             className="absolute inset-0 w-full h-full"
             onMouseDown={(e) => {
               if (!tool || e.target !== e.target.getStage()) return;
               const pos = e.target.getStage().getPointerPosition();
               if (!pos) return;
+
               if (tool === "box") {
                 setDrawing({ type: "box", x: pos.x, y: pos.y, w: 0, h: 0 });
               } else if (tool === "arrow") {
-                setDrawing({ type: "arrow", x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
+                setDrawing({
+                  type: "arrow",
+                  x1: pos.x,
+                  y1: pos.y,
+                  x2: pos.x,
+                  y2: pos.y,
+                });
               } else if (tool === "x") {
                 addAnnotation({ type: "x", x: pos.x, y: pos.y });
               } else if (tool === "text") {
@@ -233,6 +249,7 @@ function SlidesCard() {
               if (!drawing) return;
               const pos = e.target.getStage().getPointerPosition();
               if (!pos) return;
+
               if (drawing.type === "box") {
                 setDrawing({
                   ...drawing,
@@ -331,7 +348,7 @@ function SlidesCard() {
                 );
               })}
 
-              {/* Temporary preview */}
+              {/* Temporary drawing preview */}
               {drawing?.type === "box" && (
                 <Rect
                   x={drawing.x}
@@ -356,7 +373,7 @@ function SlidesCard() {
               <Transformer ref={trRef} rotateEnabled={true} resizeEnabled={true} />
             </Layer>
           </Stage>
-        </div>
+        </SlideContainer>
       ) : (
         <p className="text-slate-400">No slide selected.</p>
       )}
@@ -383,14 +400,17 @@ function SlidesCard() {
         >
           {isPlaying ? "⏸ Pause" : "▶ Play"}
         </button>
-        <button onClick={clearAllAnnotations} className="px-3 py-1 bg-red-600 rounded">
+        <button
+          onClick={clearAllAnnotations}
+          className="px-3 py-1 bg-red-600 rounded"
+        >
           🗑 Clear All
         </button>
         <button
-          onClick={() => setZoom((z) => (z === 1 ? 1.5 : 1))}
+          onClick={() => setIsFullscreen(!isFullscreen)}
           className="px-3 py-1 bg-slate-700 rounded"
         >
-          {zoom === 1 ? "🔍 Enlarge" : "🔎 Shrink"}
+          {isFullscreen ? "🔽 Shrink" : "🔼 Enlarge"}
         </button>
       </div>
 
@@ -398,25 +418,33 @@ function SlidesCard() {
       <div className="flex flex-wrap justify-center gap-2 mt-2">
         <button
           onClick={() => setTool("x")}
-          className={`px-3 py-1 rounded ${tool === "x" ? "bg-blue-600" : "bg-slate-700"}`}
+          className={`px-3 py-1 rounded ${
+            tool === "x" ? "bg-blue-600" : "bg-slate-700"
+          }`}
         >
           ❌ X
         </button>
         <button
           onClick={() => setTool("box")}
-          className={`px-3 py-1 rounded ${tool === "box" ? "bg-blue-600" : "bg-slate-700"}`}
+          className={`px-3 py-1 rounded ${
+            tool === "box" ? "bg-blue-600" : "bg-slate-700"
+          }`}
         >
           ⬛ Box
         </button>
         <button
           onClick={() => setTool("arrow")}
-          className={`px-3 py-1 rounded ${tool === "arrow" ? "bg-blue-600" : "bg-slate-700"}`}
+          className={`px-3 py-1 rounded ${
+            tool === "arrow" ? "bg-blue-600" : "bg-slate-700"
+          }`}
         >
           ➡️ Arrow
         </button>
         <button
           onClick={() => setTool("text")}
-          className={`px-3 py-1 rounded ${tool === "text" ? "bg-blue-600" : "bg-slate-700"}`}
+          className={`px-3 py-1 rounded ${
+            tool === "text" ? "bg-blue-600" : "bg-slate-700"
+          }`}
         >
           📝 Text
         </button>
