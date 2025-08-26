@@ -63,34 +63,90 @@ async function fetchNotams(icao = "KMGM") {
     );
 
     const $ = cheerio.load(html);
-    const notams = [];
+    let notams = [];
 
-    // Each NOTAM is in a <section id="notam-...">
+    // --- Primary Parse: <section id="notam-...">
     $("section[id^=notam-]").each((_, el) => {
       const header = $(el).find("h3").text().trim();
       const body = $(el).find("p.notam").text().trim();
+      if (!header || !body) return;
 
-      if (!header || !body) {
-        return; // skip this section if missing data
-      }
-
-      // Extract NOTAM ID from header
+      // Extract NOTAM ID
       const match = header.match(
         /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
       );
       const id = match ? match[0] : header.slice(0, 20);
 
-      // Push combined NOTAM
-      notams.push({ id, text: `${header}\n${body}` });
+      // Always append ICAO (KMGM)
+      const locMatch = header.match(/\(KMGM\)/);
+      const location = locMatch ? " (KMGM)" : "";
+
+      // Clean body lines
+      const lines = body.split("\n").map((l) => l.trim());
+      const cleanedLines = [];
+      for (const line of lines) {
+        if (/^\w{4,}\s+NOTAMN/.test(line)) continue;
+        if (line.startsWith("Q)")) {
+          const abcMatch = line.match(/A\).*?B\).*?C\)[^ ]*/);
+          if (abcMatch) cleanedLines.push(abcMatch[0]);
+          continue;
+        }
+        if (line.startsWith("CREATED:")) continue;
+        if (line.startsWith("SOURCE:")) continue;
+        cleanedLines.push(line);
+      }
+
+      notams.push({
+        id,
+        text: `${id}${location}\n${cleanedLines.join("\n")}`,
+      });
     });
 
-    console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
+    // --- Fallback Parse: Regex if no NOTAMs found
+    if (notams.length === 0) {
+      console.warn("⚠️ Section parse failed, falling back to regex mode...");
+      const lines = html.split("\n");
+      let currentNotam = null;
+
+      for (const line of lines) {
+        const text = line.trim();
+        if (!text) continue;
+
+        if (/^(NOTAM|M\d{3,4}\/\d{2}|!\w{3}|FDC)/.test(text)) {
+          if (currentNotam) notams.push(currentNotam);
+
+          const match = text.match(
+            /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
+          );
+          const id = match ? match[0] : text.slice(0, 20);
+
+          currentNotam = { id, text };
+        } else if (currentNotam) {
+          if (!text.startsWith("CREATED:") && !text.startsWith("SOURCE:")) {
+            currentNotam.text += "\n" + text;
+          }
+        }
+      }
+      if (currentNotam) notams.push(currentNotam);
+    }
+
+    // --- Sort by Criticality
+    const score = (n) => {
+      const t = n.text.toUpperCase();
+      if (t.includes("CLSD") || t.includes("U/S") || t.includes("UNSERVICEABLE") || t.includes("OUT OF SERVICE")) return 1;
+      if (t.includes("OBST") || t.includes("OBSTACLE") || t.includes("CRANE") || t.includes("TOWER")) return 2;
+      return 3;
+    };
+    notams.sort((a, b) => score(a) - score(b));
+
+    console.log(`✅ Returning ${notams.length} NOTAMs for ${icao}`);
     return notams;
   } catch (err) {
     console.error("❌ NOTAM scrape failed:", err.message);
     return [];
   }
 }
+
 
 // ---- Routes ----
 app.get("/", (req, res) => res.send("✅ Airfield Dashboard Backend running"));
