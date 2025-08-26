@@ -139,18 +139,36 @@ app.get("/", (req, res) => res.send("✅ Airfield Dashboard Backend running"));
 // NOTAMs
 app.get("/api/notams", async (req, res) => {
   const icao = req.query.icao || "KMGM";
-  const notams = await fetchNotams(icao);
+  const force = req.query.force === "1";
+  const notams = await fetchNotams(icao, force);
   res.json({ notams });
 });
 
-// Weather stubs
-app.get("/api/metar", (req, res) => {
+// Weather live fetch
+app.get("/api/metar", async (req, res) => {
   const icao = req.query.icao || "KMGM";
-  res.json({ raw: `${icao} 251755Z AUTO 00000KT 10SM CLR 30/18 A2992 RMK AO2` });
+  try {
+    const { data } = await axios.get(
+      `https://aviationweather.gov/api/data/metar?ids=${icao}&format=raw&hours=1`
+    );
+    res.json({ raw: data.trim() });
+  } catch (err) {
+    console.error("❌ METAR fetch failed:", err.message);
+    res.json({ raw: `${icao} -- METAR unavailable` });
+  }
 });
-app.get("/api/taf", (req, res) => {
+
+app.get("/api/taf", async (req, res) => {
   const icao = req.query.icao || "KMGM";
-  res.json({ raw: `${icao} 251730Z 2518/2618 18005KT P6SM SCT050 BKN200` });
+  try {
+    const { data } = await axios.get(
+      `https://aviationweather.gov/api/data/taf?ids=${icao}&format=raw&hours=1`
+    );
+    res.json({ raw: data.trim() });
+  } catch (err) {
+    console.error("❌ TAF fetch failed:", err.message);
+    res.json({ raw: `${icao} -- TAF unavailable` });
+  }
 });
 
 // State persistence
