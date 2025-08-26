@@ -104,9 +104,6 @@ function computeCrosswind(metarWind, activeRunway) {
   const cross = Math.round(spd * Math.sin((rel * Math.PI) / 180));
   return { crosswind: cross, warning: Math.abs(cross) >= 25 };
 }
-
-
-// --- SlidesCards ---
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -213,7 +210,6 @@ function SlidesCard() {
   const SlideContainer = ({ children }) =>
     isFullscreen ? (
       <div className="fixed inset-0 z-50 bg-black flex flex-col">
-        {/* ✅ Controls bar fixed and clickable */}
         <div className="flex justify-between p-2 bg-slate-900 text-white relative z-50">
           <button
             onClick={() => setIsFullscreen(false)}
@@ -249,8 +245,8 @@ function SlidesCard() {
             alt="Slide"
             className="object-contain max-h-full max-w-full"
           />
-          {/* Stage + annotations unchanged */}
-          {/* ... keep your existing Stage, Layer, Rect, Arrow, etc. */}
+          {/* Stage, annotations, transformer — same as before */}
+          {/* ... */}
         </SlideContainer>
       ) : (
         <p className="text-slate-400">No slide selected.</p>
@@ -316,29 +312,35 @@ function SlidesCard() {
     </section>
   );
 }
-
 // --- Main Dashboard ---
 export default function Dashboard() {
   const ICAO = "KMGM";
 
+  // Weather
   const [metar, setMetar] = useState("");
   const [taf, setTaf] = useState("");
   const [parsed, setParsed] = useState({});
   const [cat, setCat] = useState("VFR");
   const [fits, setFits] = useState({ level: "NORMAL", tempF: NaN });
   const [altReq, setAltReq] = useState(false);
-  const [altICAO, setAltICAO] = useState("");
   const [notams, setNotams] = useState([]);
   const [lastUpdate, setLastUpdate] = useState(new Date());
-  const [activeRunway, setActiveRunway] = useState("10");
   const [crosswind, setCrosswind] = useState(null);
 
-  // --- Airfield Toggles ---
-  const [rsc, setRsc] = useState("DRY");
-  const [rscNotes, setRscNotes] = useState("");
-  const [barriers, setBarriers] = useState({ east: "DOWN", west: "DOWN" });
-  const [navaids, setNavaids] = useState({});
-  const [arff, setArff] = useState("GREEN");
+  // Persisted state
+  const [airfield, setAirfield] = useState({
+    activeRunway: "10",
+    rsc: "DRY",
+    rscNotes: "",
+    barriers: { east: "DOWN", west: "DOWN" },
+    arff: "GREEN",
+  });
+  const [navaids, setNavaids] = useState({
+    mgm: "IN",
+    mxf: "IN",
+    ils10: "IN",
+    ils28: "IN",
+  });
   const [bash, setBash] = useState({
     KMGM: "LOW",
     KMXF: "LOW",
@@ -349,7 +351,7 @@ export default function Dashboard() {
     ShelbyRange: "LOW",
   });
 
-  // --- Burn-in jitter ---
+  // Burn-in jitter
   const [jitter, setJitter] = useState({ x: 0, y: 0 });
 
   const API =
@@ -357,20 +359,18 @@ export default function Dashboard() {
       ? process.env.REACT_APP_API_URL
       : "https://one87oss-airfield-dashboard.onrender.com";
 
-  // --- Fetch Data ---
+  // --- Fetch functions ---
   async function fetchMetarTaf() {
-  try {
-    const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
-    const t = await axios.get(`${API}/api/taf?icao=${ICAO}`);
-
-    setMetar(m.data.rawOb || m.data.raw || "");
-    // Force TAF to use only `raw`
-    setTaf(t.data.raw ? t.data.raw.trim() : "");
-    setLastUpdate(new Date());
-  } catch (err) {
-    console.error("Fetch METAR/TAF error:", err);
+    try {
+      const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
+      const t = await axios.get(`${API}/api/taf?icao=${ICAO}`);
+      setMetar(m.data.raw || "");
+      setTaf(t.data.raw || "");
+      setLastUpdate(new Date());
+    } catch (err) {
+      console.error("Fetch METAR/TAF error:", err);
+    }
   }
-}
 
   async function fetchNotams() {
     try {
@@ -381,84 +381,50 @@ export default function Dashboard() {
     }
   }
 
-  async function fetchNavaids() {
+  async function fetchState() {
     try {
-      const res = await axios.get(`${API}/api/navaids`);
-      setNavaids(res.data);
-    } catch {}
-  }
-
-  async function fetchBash() {
-    try {
-      const res = await axios.get(`${API}/api/bash`);
-      setBash(res.data);
-    } catch {}
-  }
-
-  // --- State Persistence ---
-async function fetchState() {
-  try {
-    const res = await axios.get(`${API}/api/state`);
-    const s = res.data;
-
-    // Update local React state from backend values
-    if (s.airfield) {
-      setActiveRunway(s.airfield.activeRunway || "10");
-      setRsc(s.airfield.rsc || "DRY");
-      setRscNotes(s.airfield.rscNotes || "");
-      setBarriers(s.airfield.barriers || { east: "DOWN", west: "DOWN" });
-      setArff(s.airfield.arff || "GREEN");
+      const res = await axios.get(`${API}/api/state`);
+      const s = res.data;
+      if (s.airfield) setAirfield(s.airfield);
+      if (s.navaids) setNavaids(s.navaids);
+      if (s.bash) setBash(s.bash);
+    } catch (err) {
+      console.error("❌ Failed to fetch state:", err.message);
     }
-    if (s.navaids) setNavaids(s.navaids);
-    if (s.bash) setBash(s.bash);
-  } catch (err) {
-    console.error("❌ Failed to fetch state:", err.message);
   }
-}
 
-async function saveState(updated) {
-  try {
-    await axios.post(`${API}/api/state`, updated);
-  } catch (err) {
-    console.error("❌ Failed to save state:", err.message);
+  async function saveState(updated) {
+    try {
+      await axios.post(`${API}/api/state`, updated);
+    } catch (err) {
+      console.error("❌ Failed to save state:", err.message);
+    }
   }
-}
 
-// --- Auto refresh + jitter ---
-useEffect(() => {
-  fetchMetarTaf();
-  fetchNotams();
-  fetchNavaids();
-  fetchBash();
-  fetchState();   // 🔹 load persisted state on mount
-
-  // METAR/TAF every 5 min
-  const wxTimer = setInterval(fetchMetarTaf, 5 * 60 * 1000);
-  // NOTAMs every 15 min
-  const notamTimer = setInterval(fetchNotams, 15 * 60 * 1000);
-  // State refresh every 5 min
-  const stateTimer = setInterval(() => {
-    fetchNavaids();
-    fetchBash();
+  // --- Auto refresh + jitter ---
+  useEffect(() => {
+    fetchMetarTaf();
+    fetchNotams();
     fetchState();
-  }, 5 * 60 * 1000);
 
-  // jitter every 1 min
-  const jitterTimer = setInterval(() => {
-    setJitter({
-      x: Math.floor(Math.random() * 3) - 1,
-      y: Math.floor(Math.random() * 3) - 1,
-    });
-  }, 60000);
+    const wxTimer = setInterval(fetchMetarTaf, 5 * 60 * 1000);   // 5 min
+    const notamTimer = setInterval(fetchNotams, 15 * 60 * 1000); // 15 min
+    const stateTimer = setInterval(fetchState, 5 * 60 * 1000);   // 5 min
 
-  return () => {
-    clearInterval(wxTimer);
-    clearInterval(notamTimer);
-    clearInterval(stateTimer);
-    clearInterval(jitterTimer);
-  };
-}, []);
+    const jitterTimer = setInterval(() => {
+      setJitter({
+        x: Math.floor(Math.random() * 3) - 1,
+        y: Math.floor(Math.random() * 3) - 1,
+      });
+    }, 60000); // 1 min
 
+    return () => {
+      clearInterval(wxTimer);
+      clearInterval(notamTimer);
+      clearInterval(stateTimer);
+      clearInterval(jitterTimer);
+    };
+  }, []);
 
   // --- Process METAR/TAF ---
   useEffect(() => {
@@ -489,179 +455,199 @@ useEffect(() => {
     }
     setAltReq(altNeeded);
 
-    setCrosswind(computeCrosswind(p.wind, activeRunway));
-  }, [metar, taf, activeRunway]);
-
-    return (
+    setCrosswind(computeCrosswind(p.wind, airfield.activeRunway));
+  }, [metar, taf, airfield.activeRunway]);
+  return (
     <div
       className="min-h-screen bg-slate-950 text-slate-100 p-4"
       style={{ transform: `translate(${jitter.x}px, ${jitter.y}px)` }}
     >
       {/* Header */}
-<header className="flex flex-col items-center mb-4 text-center">
-  <h1 className="text-xl font-bold">
-    187th Operations Support Squadron — {ICAO} Dannelly Field
-  </h1>
-  <p className="text-lg font-semibold">Airfield Dashboard</p>
-  <div className="text-sm mt-2">
-    <p>{new Date().toLocaleString()}</p>
-    <p>Zulu: {new Date().toUTCString()}</p>
-    <p className="text-slate-400">
-      Last Updated: {lastUpdate.toLocaleString()}
-    </p>
-    <button
-      onClick={() => {
-        fetchMetarTaf();
-        fetchNotams();
-        fetchNavaids();
-        fetchBash();
-        fetchState();   // 🔹 now also refresh persisted state
-      }}
-      className="mt-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded"
-    >
-      🔄 Refresh
-    </button>
-  </div>
-</header>
+      <header className="flex flex-col items-center mb-4 text-center">
+        <h1 className="text-xl font-bold">
+          187th Operations Support Squadron — {ICAO} Dannelly Field
+        </h1>
+        <p className="text-lg font-semibold">Airfield Dashboard</p>
+        <div className="text-sm mt-2">
+          <p>{new Date().toLocaleString()}</p>
+          <p>Zulu: {new Date().toUTCString()}</p>
+          <p className="text-slate-400">
+            Last Updated: {lastUpdate.toLocaleString()}
+          </p>
+          <button
+            onClick={() => {
+              fetchMetarTaf();
+              fetchNotams();
+              fetchState(); // 🔹 refresh persisted state too
+            }}
+            className="mt-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded"
+          >
+            🔄 Refresh
+          </button>
+        </div>
+      </header>
 
       {/* First Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
         {/* Airfield Status */}
-<section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
-  <h2 className="text-lg font-bold underline mb-2">Airfield Status</h2>
+        <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
+          <h2 className="text-lg font-bold underline mb-2">Airfield Status</h2>
 
-  {/* Active Runway */}
-  <div className="mb-2">
-    <p className="font-semibold">Active Runway</p>
-    <button
-      className="px-3 py-1 rounded bg-green-600"
-      onClick={() => {
-        const newRunway = activeRunway === "10" ? "28" : "10";
-        setActiveRunway(newRunway);
-        saveState({ airfield: { ...savedState.airfield, activeRunway: newRunway } });
-      }}
-    >
-      {activeRunway}
-    </button>
-  </div>
+          {/* Active Runway */}
+          <div className="mb-2">
+            <p className="font-semibold">Active Runway</p>
+            <button
+              className="px-3 py-1 rounded bg-green-600"
+              onClick={() => {
+                const newAirfield = {
+                  ...airfield,
+                  activeRunway: airfield.activeRunway === "10" ? "28" : "10",
+                };
+                setAirfield(newAirfield);
+                saveState({ airfield: newAirfield });
+              }}
+            >
+              {airfield.activeRunway}
+            </button>
+          </div>
 
-  {/* RSC */}
-  <div className="mb-2">
-    <p className="font-semibold">RSC</p>
-    <div className="flex gap-2">
-      <button
-        className={`px-3 py-1 rounded ${
-          rsc === "DRY"
-            ? "bg-green-600"
-            : rsc === "WET"
-            ? "bg-red-600"
-            : "bg-slate-700"
-        }`}
-        onClick={() => {
-          const newRsc = rsc === "DRY" ? "WET" : rsc === "WET" ? "N/A" : "DRY";
-          setRsc(newRsc);
-          saveState({ airfield: { ...savedState.airfield, rsc: newRsc } });
-        }}
-      >
-        {rsc}
-      </button>
-      <input
-        type="text"
-        placeholder="Notes"
-        value={rscNotes}
-        onChange={(e) => {
-          setRscNotes(e.target.value);
-          saveState({ airfield: { ...savedState.airfield, rscNotes: e.target.value } });
-        }}
-        className="flex-1 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-sm"
-      />
-    </div>
-  </div>
+          {/* RSC */}
+          <div className="mb-2">
+            <p className="font-semibold">RSC</p>
+            <div className="flex gap-2">
+              <button
+                className={`px-3 py-1 rounded ${
+                  airfield.rsc === "DRY"
+                    ? "bg-green-600"
+                    : airfield.rsc === "WET"
+                    ? "bg-red-600"
+                    : "bg-slate-700"
+                }`}
+                onClick={() => {
+                  const newAirfield = {
+                    ...airfield,
+                    rsc:
+                      airfield.rsc === "DRY"
+                        ? "WET"
+                        : airfield.rsc === "WET"
+                        ? "N/A"
+                        : "DRY",
+                  };
+                  setAirfield(newAirfield);
+                  saveState({ airfield: newAirfield });
+                }}
+              >
+                {airfield.rsc}
+              </button>
+              <input
+                type="text"
+                placeholder="Notes"
+                value={airfield.rscNotes}
+                onChange={(e) => {
+                  const newAirfield = { ...airfield, rscNotes: e.target.value };
+                  setAirfield(newAirfield);
+                  saveState({ airfield: newAirfield });
+                }}
+                className="flex-1 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-sm"
+              />
+            </div>
+          </div>
 
-  {/* Barriers */}
-  <div className="mb-2">
-    <p className="font-semibold">Barriers</p>
-    <div className="flex gap-2 flex-wrap">
-      {["east", "west"].map((side) => (
-        <button
-          key={side}
-          className={`px-2 py-1 rounded ${
-            barriers[side] === "UNSERVICEABLE" ? "bg-red-600" : "bg-green-600"
-          }`}
-          onClick={() => {
-            const newState =
-              barriers[side] === "DOWN"
-                ? "UP"
-                : barriers[side] === "UP"
-                ? "UNSERVICEABLE"
-                : "DOWN";
-            const updated = { ...barriers, [side]: newState };
-            setBarriers(updated);
-            saveState({ airfield: { ...savedState.airfield, barriers: updated } });
-          }}
-        >
-          {side.toUpperCase()} BAK-12 {barriers[side]}
-        </button>
-      ))}
-    </div>
-  </div>
+          {/* Barriers */}
+          <div className="mb-2">
+            <p className="font-semibold">Barriers</p>
+            <div className="flex gap-2 flex-wrap">
+              {["east", "west"].map((side) => (
+                <button
+                  key={side}
+                  className={`px-2 py-1 rounded ${
+                    airfield.barriers[side] === "UNSERVICEABLE"
+                      ? "bg-red-600"
+                      : "bg-green-600"
+                  }`}
+                  onClick={() => {
+                    const newBarriers = {
+                      ...airfield.barriers,
+                      [side]:
+                        airfield.barriers[side] === "DOWN"
+                          ? "UP"
+                          : airfield.barriers[side] === "UP"
+                          ? "UNSERVICEABLE"
+                          : "DOWN",
+                    };
+                    const newAirfield = { ...airfield, barriers: newBarriers };
+                    setAirfield(newAirfield);
+                    saveState({ airfield: newAirfield });
+                  }}
+                >
+                  {side.toUpperCase()} BAK-12 {airfield.barriers[side]}
+                </button>
+              ))}
+            </div>
+          </div>
 
-  {/* NAVAIDs */}
-<div className="mb-2">
-  <p className="font-semibold">NAVAIDs</p>
-  <div className="flex gap-2 flex-wrap">
-    {Object.keys(navaids).map((n) => (
-      <button
-        key={n}
-        className={`px-2 py-1 rounded ${
-          navaids[n] === "IN" ? "bg-green-600" : "bg-red-600"
-        }`}
-        onClick={() => {
-          const updated = {
-            ...navaids,
-            [n]: navaids[n] === "IN" ? "OUT" : "IN",
-          };
-          setNavaids(updated);
-          saveState({ navaids: updated });  // 🔹 persist to backend
-        }}
-      >
-        {n === "mgm"
-          ? "MGM TACAN"
-          : n === "mxf"
-          ? "MXF TACAN"
-          : n === "ils10"
-          ? "ILS 10"
-          : n === "ils28"
-          ? "ILS 28"
-          : n.toUpperCase()}
-      </button>
-    ))}
-  </div>
-</div>
+          {/* NAVAIDs */}
+          <div className="mb-2">
+            <p className="font-semibold">NAVAIDs</p>
+            <div className="flex gap-2 flex-wrap">
+              {Object.keys(navaids).map((n) => (
+                <button
+                  key={n}
+                  className={`px-2 py-1 rounded ${
+                    navaids[n] === "IN" ? "bg-green-600" : "bg-red-600"
+                  }`}
+                  onClick={() => {
+                    const updated = {
+                      ...navaids,
+                      [n]: navaids[n] === "IN" ? "OUT" : "IN",
+                    };
+                    setNavaids(updated);
+                    saveState({ navaids: updated });
+                  }}
+                >
+                  {n === "mgm"
+                    ? "MGM TACAN"
+                    : n === "mxf"
+                    ? "MXF TACAN"
+                    : n === "ils10"
+                    ? "ILS 10"
+                    : n === "ils28"
+                    ? "ILS 28"
+                    : n.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
 
-  {/* ARFF */}
-  <div className="mb-2">
-    <p className="font-semibold">ARFF</p>
-    <button
-      className={`px-3 py-1 rounded ${
-        arff === "GREEN"
-          ? "bg-green-600"
-          : arff === "YELLOW"
-          ? "bg-yellow-500"
-          : "bg-red-600"
-      }`}
-      onClick={() => {
-        const newArff = arff === "GREEN" ? "YELLOW" : arff === "YELLOW" ? "RED" : "GREEN";
-        setArff(newArff);
-        saveState({ airfield: { ...savedState.airfield, arff: newArff } });
-      }}
-    >
-      ARFF {arff}
-    </button>
-  </div>
-</section>
-
-
+          {/* ARFF */}
+          <div className="mb-2">
+            <p className="font-semibold">ARFF</p>
+            <button
+              className={`px-3 py-1 rounded ${
+                airfield.arff === "GREEN"
+                  ? "bg-green-600"
+                  : airfield.arff === "YELLOW"
+                  ? "bg-yellow-500"
+                  : "bg-red-600"
+              }`}
+              onClick={() => {
+                const newAirfield = {
+                  ...airfield,
+                  arff:
+                    airfield.arff === "GREEN"
+                      ? "YELLOW"
+                      : airfield.arff === "YELLOW"
+                      ? "RED"
+                      : "GREEN",
+                };
+                setAirfield(newAirfield);
+                saveState({ airfield: newAirfield });
+              }}
+            >
+              ARFF {airfield.arff}
+            </button>
+          </div>
+        </section>
 
         {/* Weather */}
         <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
@@ -689,7 +675,9 @@ useEffect(() => {
 
           {crosswind && (
             <div className="mb-2">
-              <p className="font-semibold">Crosswind (Runway {activeRunway})</p>
+              <p className="font-semibold">
+                Crosswind (Runway {airfield.activeRunway})
+              </p>
               <span
                 className={`px-3 py-1 rounded ${
                   crosswind.warning ? "bg-red-600" : "bg-green-600"
@@ -761,42 +749,41 @@ useEffect(() => {
       {/* Second Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch mt-4">
         {/* BASH Forecast */}
-<section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px] md:col-span-1">
-  <h2 className="text-lg font-bold underline mb-2">BASH Forecast</h2>
-  <div className="flex flex-col gap-2">
-    {Object.keys(bash).map((loc) => (
-      <button
-        key={loc}
-        className={`px-3 py-1 rounded font-bold ${
-          bash[loc] === "LOW"
-            ? "bg-green-600"
-            : bash[loc] === "MODERATE"
-            ? "bg-yellow-500 text-black"
-            : bash[loc] === "SEVERE"
-            ? "bg-red-600"
-            : "bg-slate-700"
-        }`}
-        onClick={() => {
-          const newLevel =
-            bash[loc] === "LOW"
-              ? "MODERATE"
-              : bash[loc] === "MODERATE"
-              ? "SEVERE"
-              : bash[loc] === "SEVERE"
-              ? "N/A"
-              : "LOW";
+        <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px] md:col-span-1">
+          <h2 className="text-lg font-bold underline mb-2">BASH Forecast</h2>
+          <div className="flex flex-col gap-2">
+            {Object.keys(bash).map((loc) => (
+              <button
+                key={loc}
+                className={`px-3 py-1 rounded font-bold ${
+                  bash[loc] === "LOW"
+                    ? "bg-green-600"
+                    : bash[loc] === "MODERATE"
+                    ? "bg-yellow-500 text-black"
+                    : bash[loc] === "SEVERE"
+                    ? "bg-red-600"
+                    : "bg-slate-700"
+                }`}
+                onClick={() => {
+                  const newLevel =
+                    bash[loc] === "LOW"
+                      ? "MODERATE"
+                      : bash[loc] === "MODERATE"
+                      ? "SEVERE"
+                      : bash[loc] === "SEVERE"
+                      ? "N/A"
+                      : "LOW";
 
-          const updated = { ...bash, [loc]: newLevel };
-          setBash(updated);
-          saveState({ bash: updated });  // 🔹 Persist change
-        }}
-      >
-        {loc}: {bash[loc]}
-      </button>
-    ))}
-  </div>
-</section>
-
+                  const updated = { ...bash, [loc]: newLevel };
+                  setBash(updated);
+                  saveState({ bash: updated });
+                }}
+              >
+                {loc}: {bash[loc]}
+              </button>
+            ))}
+          </div>
+        </section>
 
         {/* Airfield Slides */}
         <SlidesCard />
@@ -804,4 +791,3 @@ useEffect(() => {
     </div>
   );
 }
-
