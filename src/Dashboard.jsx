@@ -115,6 +115,7 @@ function SlidesCard() {
   const [selectedId, setSelectedId] = useState(null);
   const [drawing, setDrawing] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [imgObj, setImgObj] = useState(null);
   const trRef = useRef();
 
   const API =
@@ -122,6 +123,7 @@ function SlidesCard() {
       ? process.env.REACT_APP_API_URL
       : "https://one87oss-airfield-dashboard.onrender.com";
 
+  // Load slides + annotations
   useEffect(() => {
     axios.get(`${API}/api/slides`).then((res) => setSlides(res.data));
     axios.get(`${API}/api/annotations`).then((res) =>
@@ -129,6 +131,27 @@ function SlidesCard() {
     );
   }, [API]);
 
+  // Load current slide image
+  useEffect(() => {
+    if (slides[currentSlide]) {
+      const img = new window.Image();
+      img.src = `${API}/slides/${slides[currentSlide]}`;
+      img.onload = () => setImgObj(img);
+    }
+  }, [slides, currentSlide, API]);
+
+  // Auto-play slides
+  useEffect(() => {
+    if (isPlaying && slides.length > 0) {
+      const interval = setInterval(
+        () => setCurrentSlide((s) => (s + 1) % slides.length),
+        5000
+      );
+      return () => clearInterval(interval);
+    }
+  }, [isPlaying, slides.length]);
+
+  // Save annotations
   const saveAnnotations = (updated) => {
     setAnnotations(updated);
     axios.post(`${API}/api/annotations`, { slides: updated });
@@ -144,25 +167,85 @@ function SlidesCard() {
     saveAnnotations(annots);
   };
 
+  const updateAnnotation = (id, newAttrs) => {
+    const file = slides[currentSlide];
+    if (!file) return;
+    const slideKey = file;
+    const annots = { ...annotations };
+    annots[slideKey] = annots[slideKey].map((a) =>
+      a._id === id ? { ...a, ...newAttrs } : a
+    );
+    saveAnnotations(annots);
+  };
+
+  const deleteAnnotation = (id) => {
+    const file = slides[currentSlide];
+    if (!file) return;
+    const slideKey = file;
+    const annots = { ...annotations };
+    annots[slideKey] = annots[slideKey].filter((a) => a._id !== id);
+    saveAnnotations(annots);
+    setSelectedId(null);
+    trRef.current?.nodes([]);
+  };
+
+  const clearAllAnnotations = () => {
+    const file = slides[currentSlide];
+    if (!file) return;
+    const slideKey = file;
+    const annots = { ...annotations };
+    annots[slideKey] = [];
+    saveAnnotations(annots);
+    setSelectedId(null);
+    trRef.current?.nodes([]);
+  };
+
+  // Transformer follow selection
+  useEffect(() => {
+    if (trRef.current && selectedId) {
+      const shape = trRef.current.getStage().findOne(`#${selectedId}`);
+      if (shape) {
+        trRef.current.nodes([shape]);
+        trRef.current.getLayer().batchDraw();
+      }
+    }
+  }, [selectedId, annotations]);
+
+  if (slides.length === 0) {
+    return (
+      <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px] md:col-span-2">
+        <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
+        <p className="text-sm text-slate-400">No slides available.</p>
+      </section>
+    );
+  }
+
   const file = slides[currentSlide] || null;
   const slideKey = file || "unknown";
 
   const SlideContainer = ({ children }) =>
     isFullscreen ? (
       <div className="fixed inset-0 z-50 bg-black flex flex-col">
-        <div className="flex justify-between p-2 bg-slate-900 text-white">
-          <button onClick={() => setIsFullscreen(false)} className="px-3 py-1 bg-red-600 rounded">✖ Close</button>
-          <button onClick={() => {
-            const annots = { ...annotations, [slideKey]: [] };
-            saveAnnotations(annots);
-          }} className="px-3 py-1 bg-yellow-600 rounded">🧹 Clear All</button>
+        <div className="flex justify-between p-2 bg-slate-900 text-white relative z-50">
+          <button
+            onClick={() => setIsFullscreen(false)}
+            className="px-3 py-1 bg-red-600 rounded"
+          >
+            ✖ Close
+          </button>
+          <button
+            onClick={clearAllAnnotations}
+            className="px-3 py-1 bg-yellow-600 rounded"
+          >
+            🧹 Clear All
+          </button>
         </div>
         <div className="flex-1 flex items-center justify-center overflow-auto">
           {children}
         </div>
       </div>
     ) : (
-      <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[400px]">
+      <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[500px]">
         {children}
       </div>
     );
@@ -175,18 +258,24 @@ function SlidesCard() {
         <SlideContainer>
           <Stage
             width={isFullscreen ? window.innerWidth : 800}
-            height={isFullscreen ? window.innerHeight - 50 : 400}
+            height={isFullscreen ? window.innerHeight - 50 : 500}
             className="absolute inset-0 w-full h-full"
             onMouseDown={(e) => {
               if (!tool) return;
-              if (e.target === e.target.getStage() || e.target.name() === "background") {
+              if (
+                e.target.getStage() &&
+                (e.target === e.target.getStage() || e.target.name() === "background")
+              ) {
                 const pos = e.target.getStage().getPointerPosition();
                 if (!pos) return;
 
-                if (tool === "box") setDrawing({ type: "box", x: pos.x, y: pos.y, w: 0, h: 0 });
-                else if (tool === "arrow") setDrawing({ type: "arrow", x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
-                else if (tool === "x") addAnnotation({ type: "x", x: pos.x, y: pos.y });
-                else if (tool === "text") {
+                if (tool === "box") {
+                  setDrawing({ type: "box", x: pos.x, y: pos.y, w: 0, h: 0 });
+                } else if (tool === "arrow") {
+                  setDrawing({ type: "arrow", x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
+                } else if (tool === "x") {
+                  addAnnotation({ type: "x", x: pos.x, y: pos.y });
+                } else if (tool === "text") {
                   const text = prompt("Enter note:");
                   if (text) addAnnotation({ type: "text", x: pos.x, y: pos.y, text });
                 }
@@ -196,8 +285,12 @@ function SlidesCard() {
               if (!drawing) return;
               const pos = e.target.getStage().getPointerPosition();
               if (!pos) return;
-              if (drawing.type === "box") setDrawing({ ...drawing, w: pos.x - drawing.x, h: pos.y - drawing.y });
-              else if (drawing.type === "arrow") setDrawing({ ...drawing, x2: pos.x, y2: pos.y });
+
+              if (drawing.type === "box") {
+                setDrawing({ ...drawing, w: pos.x - drawing.x, h: pos.y - drawing.y });
+              } else if (drawing.type === "arrow") {
+                setDrawing({ ...drawing, x2: pos.x, y2: pos.y });
+              }
             }}
             onMouseUp={() => {
               if (drawing) {
@@ -207,27 +300,85 @@ function SlidesCard() {
             }}
           >
             <Layer>
-              {/* Background slide image */}
-              <KonvaImage
-                name="background"
-                image={(() => {
-                  const img = new window.Image();
-                  img.src = `${API}/slides/${file}`;
-                  return img;
-                })()}
-                x={0}
-                y={0}
-                width={isFullscreen ? window.innerWidth : 800}
-                height={isFullscreen ? window.innerHeight - 50 : 400}
-              />
+              {imgObj && (
+                <KonvaImage
+                  name="background"
+                  image={imgObj}
+                  x={0}
+                  y={0}
+                  width={isFullscreen ? window.innerWidth : 800}
+                  height={(imgObj.height / imgObj.width) * (isFullscreen ? window.innerWidth : 800)}
+                />
+              )}
 
-              {/* TODO: your annotations Rect/Arrow/Text code goes here */}
+              {annotations[slideKey]?.map((a) => {
+                const commonProps = {
+                  key: a._id,
+                  id: a._id,
+                  draggable: true,
+                  onClick: () => setSelectedId(a._id),
+                  onTap: () => setSelectedId(a._id),
+                  onDragEnd: (e) =>
+                    updateAnnotation(a._id, {
+                      x: e.target.x(),
+                      y: e.target.y(),
+                    }),
+                };
+
+                let shape;
+                if (a.type === "box") {
+                  shape = <Rect {...commonProps} x={a.x} y={a.y} width={a.w} height={a.h} stroke="red" />;
+                } else if (a.type === "x") {
+                  shape = <KText {...commonProps} x={a.x} y={a.y} text="X" fontSize={32} fill="red" fontStyle="bold" />;
+                } else if (a.type === "arrow") {
+                  shape = <Arrow {...commonProps} points={[a.x1, a.y1, a.x2, a.y2]} stroke="green" strokeWidth={4} pointerLength={10} pointerWidth={10} />;
+                } else if (a.type === "text") {
+                  shape = <KText {...commonProps} x={a.x} y={a.y} text={a.text} fontSize={16} fill="white" />;
+                }
+
+                return (
+                  <Group key={a._id}>
+                    {shape}
+                    {selectedId === a._id && (
+                      <Label x={(a.x || a.x1 || 0) + 10} y={(a.y || a.y1 || 0) - 20} onClick={() => deleteAnnotation(a._id)}>
+                        <Tag fill="red" pointerDirection="up" />
+                        <KText text="❌" fontSize={16} fill="white" padding={2} />
+                      </Label>
+                    )}
+                  </Group>
+                );
+              })}
+
+              {drawing?.type === "box" && (
+                <Rect x={drawing.x} y={drawing.y} width={drawing.w} height={drawing.h} stroke="red" dash={[4, 4]} />
+              )}
+              {drawing?.type === "arrow" && (
+                <Arrow points={[drawing.x1, drawing.y1, drawing.x2, drawing.y2]} stroke="green" strokeWidth={4} pointerLength={10} pointerWidth={10} dash={[4, 4]} />
+              )}
+
+              <Transformer ref={trRef} rotateEnabled={true} resizeEnabled={true} />
             </Layer>
           </Stage>
         </SlideContainer>
       ) : (
         <p className="text-slate-400">No slide selected.</p>
       )}
+
+      {/* Controls */}
+      <div className="flex flex-wrap justify-center gap-2 mt-3">
+        <button onClick={() => setCurrentSlide((s) => (s - 1 + slides.length) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">⏮ Prev</button>
+        <button onClick={() => setCurrentSlide((s) => (s + 1) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">⏭ Next</button>
+        <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-slate-700 rounded">{isPlaying ? "⏸ Pause" : "▶ Play"}</button>
+        <button onClick={() => setIsFullscreen(true)} className="px-3 py-1 bg-slate-700 rounded">⛶ Enlarge</button>
+      </div>
+
+      {/* Tools */}
+      <div className="flex flex-wrap justify-center gap-2 mt-2">
+        <button onClick={() => setTool("x")} className={`px-3 py-1 rounded ${tool === "x" ? "bg-blue-600" : "bg-slate-700"}`}>❌ X</button>
+        <button onClick={() => setTool("box")} className={`px-3 py-1 rounded ${tool === "box" ? "bg-blue-600" : "bg-slate-700"}`}>⬛ Box</button>
+        <button onClick={() => setTool("arrow")} className={`px-3 py-1 rounded ${tool === "arrow" ? "bg-blue-600" : "bg-slate-700"}`}>➡️ Arrow</button>
+        <button onClick={() => setTool("text")} className={`px-3 py-1 rounded ${tool === "text" ? "bg-blue-600" : "bg-slate-700"}`}>📝 Text</button>
+      </div>
     </section>
   );
 }
