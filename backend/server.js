@@ -70,26 +70,19 @@ async function fetchNotams(icao = "KMGM") {
       const header = $(el).find("h3").text().trim();
       const body = $(el).find("p.notam").text().trim();
 
-      if (!header || !body) return;
+      if (!header || !body) {
+        return; // skip this section if missing data
+      }
 
-      // ID from the section header (first NOTAM code inside h3)
-      const match = header.match(/(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/);
+      // Extract NOTAM ID from header
+      const match = header.match(
+        /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
+      );
       const id = match ? match[0] : header.slice(0, 20);
 
-      // Store as raw
+      // Push combined NOTAM
       notams.push({ id, text: `${header}\n${body}` });
     });
-
-    console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
-    return notams;
-  } catch (err) {
-    console.error("❌ NOTAM scrape failed:", err.message);
-    return [];
-  }
-}
-
-    // Push the last NOTAM if any
-    if (currentNotam) notams.push(currentNotam);
 
     console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
     return notams;
