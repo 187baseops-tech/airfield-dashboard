@@ -83,18 +83,14 @@ session.on(solclientjs.SessionEventCode.UP_NOTICE, () => {
       const text = msg.getSdtContainer().getXml();
       if (!text) return;
 
-      // Parse NOTAM messages
       const match = text.match(/<notamText>([\s\S]*?)<\/notamText>/i);
       if (match) {
         const rawText = match[1].trim();
-
-        // Filter KMGM only
         if (/KMGM/i.test(rawText)) {
           const idMatch = rawText.match(/!KMGM\s+(\d{2}\/\d{3,4})/);
           const id = idMatch ? idMatch[1] : `KMGM-${Date.now()}`;
-
           const notam = { id, text: rawText };
-          swimNotams = [notam, ...swimNotams].slice(0, 50); // keep last 50
+          swimNotams = [notam, ...swimNotams].slice(0, 50);
           console.log(`✅ SWIM NOTAM added for KMGM: ${id}`);
         }
       }
@@ -103,10 +99,9 @@ session.on(solclientjs.SessionEventCode.UP_NOTICE, () => {
     }
   });
 
-  messageConsumer.on(solclientjs.MessageConsumerEventName.DOWN, () => {
-    console.warn("⚠ SWIM consumer down");
-  });
-
+  messageConsumer.on(solclientjs.MessageConsumerEventName.DOWN, () =>
+    console.warn("⚠ SWIM consumer down")
+  );
   messageConsumer.connect();
   console.log(`✅ Bound to SWIM queue: ${process.env.SWIM_QUEUE}`);
 });
@@ -117,7 +112,6 @@ session.on(solclientjs.SessionEventCode.CONNECT_FAILED_ERROR, () =>
 session.on(solclientjs.SessionEventCode.DISCONNECTED, () =>
   console.warn("⚠ SWIM disconnected")
 );
-
 session.connect();
 
 // ---- OurAirports Fallback ----
@@ -129,24 +123,17 @@ async function fetchFallbackNotams(icao = "KMGM") {
       `https://ourairports.com/airports/${icao}/notams.html`,
       { httpsAgent }
     );
-
     const $ = cheerio.load(html);
     const notams = [];
-
     $("section[id^=notam-]").each((_, el) => {
       const header = $(el).find("h3").text().trim();
       const body = $(el).find("p.notam").text().trim();
       if (!header || !body) return;
-
-      const match = header.match(
-        /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
-      );
+      const match = header.match(/(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/);
       const id = match ? match[0] : header.slice(0, 20);
-
       const lines = body.split("\n").map((l) => l.trim()).filter(Boolean);
       notams.push({ id, text: `${id}\n${lines.join("\n")}` });
     });
-
     fallbackNotams = notams;
     console.log(`✅ Retrieved ${notams.length} NOTAMs from OurAirports`);
   } catch (err) {
@@ -154,8 +141,6 @@ async function fetchFallbackNotams(icao = "KMGM") {
     fallbackNotams = [];
   }
 }
-
-// refresh fallback every 15 min
 setInterval(() => fetchFallbackNotams("KMGM"), 15 * 60 * 1000);
 fetchFallbackNotams("KMGM");
 
@@ -166,8 +151,6 @@ app.get("/", (req, res) => res.send("✅ Airfield Dashboard Backend running"));
 app.get("/api/notams", (req, res) => {
   const icao = req.query.icao || "KMGM";
   if (icao !== "KMGM") return res.json({ notams: [] });
-
-  // Prefer SWIM, fallback to OurAirports
   if (swimNotams.length > 0) {
     res.json({ notams: swimNotams });
   } else {
@@ -175,28 +158,32 @@ app.get("/api/notams", (req, res) => {
   }
 });
 
-// METAR
+// ✅ METAR (NOAA plain text)
 app.get("/api/metar", async (req, res) => {
   const icao = req.query.icao || "KMGM";
   try {
     const { data } = await axios.get(
-      `https://aviationweather.gov/api/data/metar?ids=${icao}&format=raw`
+      `https://aviationweather.gov/api/data/metar?ids=${icao}&format=raw&taf=false`
     );
-    res.json({ raw: data[0]?.rawOb || `${icao} AUTO --` });
-  } catch {
-    res.json({ raw: `${icao} AUTO --` });
+    const firstLine = data.split("\n").find((line) => line.startsWith(icao)) || `${icao} NIL`;
+    res.json({ raw: firstLine.trim() });
+  } catch (err) {
+    console.error("❌ METAR fetch failed:", err.message);
+    res.json({ raw: `${icao} NIL` });
   }
 });
 
-// TAF
+// ✅ TAF (NOAA plain text)
 app.get("/api/taf", async (req, res) => {
   const icao = req.query.icao || "KMGM";
   try {
     const { data } = await axios.get(
       `https://aviationweather.gov/api/data/taf?ids=${icao}&format=raw`
     );
-    res.json({ raw: data[0]?.rawTAF || `${icao} NIL` });
-  } catch {
+    const tafLines = data.split("\n").filter((line) => line.startsWith(icao));
+    res.json({ raw: tafLines.join("\n").trim() || `${icao} NIL` });
+  } catch (err) {
+    console.error("❌ TAF fetch failed:", err.message);
     res.json({ raw: `${icao} NIL` });
   }
 });
@@ -215,7 +202,6 @@ app.get("/api/bash", (req, res) => res.json(savedState.bash));
 
 // Slides + Annotations
 app.use("/slides", express.static(SLIDES_DIR));
-
 app.get("/api/slides", (req, res) => {
   try {
     if (!fs.existsSync(SLIDES_DIR)) return res.json([]);
@@ -227,7 +213,6 @@ app.get("/api/slides", (req, res) => {
     res.json([]);
   }
 });
-
 app.get("/api/annotations", (req, res) => {
   if (fs.existsSync(ANNOT_FILE)) {
     try {
@@ -240,7 +225,6 @@ app.get("/api/annotations", (req, res) => {
     res.json({ slides: {} });
   }
 });
-
 app.post("/api/annotations", (req, res) => {
   try {
     fs.writeFileSync(ANNOT_FILE, JSON.stringify(req.body, null, 2));
