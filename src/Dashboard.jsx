@@ -463,29 +463,96 @@ export default function Dashboard() {
       style={{ transform: `translate(${jitter.x}px, ${jitter.y}px)` }}
     >
       {/* Header */}
-      <header className="flex flex-col items-center mb-4 text-center">
-        <h1 className="text-xl font-bold">
-          187th Operations Support Squadron — {ICAO} Dannelly Field
-        </h1>
-        <p className="text-lg font-semibold">Airfield Dashboard</p>
-        <div className="text-sm mt-2">
-          <p>{new Date().toLocaleString()}</p>
-          <p>Zulu: {new Date().toUTCString()}</p>
-          <p className="text-slate-400">
-            Last Updated: {lastUpdate.toLocaleString()}
-          </p>
-          <button
-            onClick={() => {
-              fetchMetarTaf();
-              fetchNotams();
-              fetchState(); // 🔹 refresh persisted state too
-            }}
-            className="mt-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded"
-          >
-            🔄 Refresh
-          </button>
-        </div>
-      </header>
+      <header className="flex flex-col items-center mb-4 text-center relative">
+  {/* Logo top-left */}
+  <img
+    src="/0187 Operations Support Squadron_(2024-08-16).png"
+    alt="187th OSS Patch"
+    className="absolute top-0 left-0 w-20 h-20 md:w-28 md:h-28 object-contain m-2"
+  />
+
+  <h1 className="text-xl font-bold">
+    187th Operations Support Squadron — {ICAO} Dannelly Field
+  </h1>
+  <p className="text-lg font-semibold">Airfield Dashboard</p>
+  <div className="text-sm mt-2">
+  {/* Local time in ICAO format */}
+  <p>
+    Local:{" "}
+    {new Date()
+      .toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+      .toUpperCase()
+      .replace(",", "")}{" "}
+    {new Date()
+      .toLocaleTimeString([], {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+      .replace(":", "")}
+    L
+  </p>
+
+  {/* Zulu time in ICAO format */}
+  <p>
+    Zulu:{" "}
+    {new Date()
+      .toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      })
+      .toUpperCase()
+      .replace(",", "")}{" "}
+    {new Date()
+      .toLocaleTimeString("en-GB", {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "UTC",
+      })
+      .replace(":", "")}
+    Z
+  </p>
+
+  {/* Last updated in local time, ICAO style */}
+  <p className="text-slate-400">
+    Last Updated:{" "}
+    {lastUpdate
+      .toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+      .toUpperCase()
+      .replace(",", "")}{" "}
+    {lastUpdate
+      .toLocaleTimeString([], {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+      .replace(":", "")}
+    L
+  </p>
+
+  <button
+    onClick={() => {
+      fetchMetarTaf();
+      fetchNotams();
+      fetchState();
+    }}
+    className="mt-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded"
+  >
+    🔄 Refresh
+  </button>
+</div>
+</header>
 
       {/* First Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
