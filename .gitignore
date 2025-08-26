@@ -1,21 +1,33 @@
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+pnpm-lock.yaml
 
-# testing
-/coverage
+# Build outputs
+dist/
+build/
+.cache/
+.next/
+out/
 
-# production
-/build
+# Logs
+*.log
+logs/
+debug.log
 
-# misc
-.DS_Store
+# Env files
 .env
 .env.local
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+.env.*.local
 
-# editor
+# OS / Editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+
+# VSCode
 .vscode/

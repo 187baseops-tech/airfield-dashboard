@@ -492,30 +492,40 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* NAVAIDs */}
-          <div className="mb-2">
-            <p className="font-semibold">NAVAIDs</p>
-            <div className="flex gap-2 flex-wrap">
-              {Object.keys(navaids).map((n) => (
-                <div
-                  key={n}
-                  className={`px-2 py-1 rounded ${
-                    navaids[n] === "IN" ? "bg-green-600" : "bg-red-600"
-                  }`}
-                >
-                  {n === "mgm"
-                    ? "MGM TACAN"
-                    : n === "mxf"
-                    ? "MXF TACAN"
-                    : n === "ils10"
-                    ? "ILS 10"
-                    : n === "ils28"
-                    ? "ILS 28"
-                    : n.toUpperCase()}
-                </div>
-              ))}
-            </div>
-          </div>
+         {/* NAVAIDs */}
+<div className="mb-2">
+  <p className="font-semibold">NAVAIDs</p>
+  <div className="flex gap-2 flex-wrap">
+    {Object.keys(navaids).map((n) => (
+      <button
+        key={n}
+        onClick={async () => {
+          try {
+            console.log("🔄 Toggling NAVAID:", n);
+            const res = await axios.post(`${API}/api/navaids`, { name: n });
+            console.log("✅ NAVAID updated:", res.data);
+            setNavaids(res.data.navaids);
+          } catch (err) {
+            console.error("❌ Failed to toggle NAVAID:", err.response?.data || err.message);
+          }
+        }}
+        className={`px-2 py-1 rounded ${
+          navaids[n] === "IN" ? "bg-green-600" : "bg-red-600"
+        }`}
+      >
+        {n === "mgm"
+          ? "MGM TACAN"
+          : n === "mxf"
+          ? "MXF TACAN"
+          : n === "ils10"
+          ? "ILS 10"
+          : n === "ils28"
+          ? "ILS 28"
+          : n.toUpperCase()}
+      </button>
+    ))}
+  </div>
+</div>
 
           {/* ARFF */}
           <div className="mb-2">
