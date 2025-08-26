@@ -45,9 +45,8 @@ function saveState() {
 }
 
 // ---- Slides / Annotations ----
-// step out of /backend so we can reach /data/slides
 const SLIDES_DIR = path.join(process.cwd(), "../data/slides");
-const ANNOT_FILE = path.join(process.cwd(), "../data/annotations.json");
+const ANNOT_FILE = path.join(SLIDES_DIR, "annotations.json");
 
 console.log("⚙️ process.cwd():", process.cwd());
 console.log("⚙️ SLIDES_DIR is set to:", SLIDES_DIR);
