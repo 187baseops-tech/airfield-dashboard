@@ -65,20 +65,17 @@ async function fetchNotams(icao = "KMGM") {
     const $ = cheerio.load(html);
     const notams = [];
 
-    // Only grab <pre> blocks that actually contain NOTAM text
+    // Get ALL <pre> blocks (each NOTAM usually comes in one <pre>)
     $("pre").each((_, el) => {
       const text = $(el).text().trim();
       if (!text) return;
-
-      // Only accept if it looks like a NOTAM
-      if (!/^(NOTAM|M\d{3,4}\/\d{2}|!\w{3}|FDC)/.test(text)) return;
 
       const cleaned = text
         .replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)")
         .replace(/\s?NOTAMN/g, "")
         .trim();
 
-      // Extract NOTAM ID
+      // Try to find a NOTAM number (fallback = slice of text)
       const match = cleaned.match(
         /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
       );
