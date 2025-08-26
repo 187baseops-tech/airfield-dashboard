@@ -104,6 +104,9 @@ function computeCrosswind(metarWind, activeRunway) {
   const cross = Math.round(spd * Math.sin((rel * Math.PI) / 180));
   return { crosswind: cross, warning: Math.abs(cross) >= 25 };
 }
+
+
+// --- SlidesCards ---
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -499,17 +502,24 @@ export default function Dashboard() {
       : "https://one87oss-airfield-dashboard.onrender.com";
 
   // --- Fetch Data ---
-  async function fetchData() {
+  async function fetchMetarTaf() {
     try {
       const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
       const t = await axios.get(`${API}/api/taf?icao=${ICAO}`);
-      const n = await axios.get(`${API}/api/notams?icao=${ICAO}`);
       setMetar(m.data.rawOb || m.data.raw || "");
       setTaf(t.data.rawTAF || t.data.raw || "");
-      setNotams(n.data?.notams || []);
       setLastUpdate(new Date());
     } catch (err) {
-      console.error("Fetch error:", err);
+      console.error("Fetch METAR/TAF error:", err);
+    }
+  }
+
+  async function fetchNotams() {
+    try {
+      const n = await axios.get(`${API}/api/notams?icao=${ICAO}`);
+      setNotams(n.data?.notams || []);
+    } catch (err) {
+      console.error("Fetch NOTAM error:", err);
     }
   }
 
@@ -529,30 +539,33 @@ export default function Dashboard() {
 
   // --- Auto refresh + jitter ---
   useEffect(() => {
-    fetchData();
+    fetchMetarTaf();
+    fetchNotams();
     fetchNavaids();
     fetchBash();
 
-    const timer = setInterval(() => {
-      fetchData();
+    // METAR/TAF every 5 min
+    const wxTimer = setInterval(fetchMetarTaf, 5 * 60 * 1000);
+    // NOTAMs every 15 min
+    const notamTimer = setInterval(fetchNotams, 15 * 60 * 1000);
+    // Navaids + BASH every 5 min
+    const stateTimer = setInterval(() => {
       fetchNavaids();
       fetchBash();
-    }, 300000); // every 5 min
+    }, 5 * 60 * 1000);
 
-    const pageReload = setInterval(() => {
-      window.location.reload();
-    }, 300000); // force full reload every 5 min
-
+    // jitter every 1 min
     const jitterTimer = setInterval(() => {
       setJitter({
         x: Math.floor(Math.random() * 3) - 1,
         y: Math.floor(Math.random() * 3) - 1,
       });
-    }, 60000); // shift every 1 min
+    }, 60000);
 
     return () => {
-      clearInterval(timer);
-      clearInterval(pageReload);
+      clearInterval(wxTimer);
+      clearInterval(notamTimer);
+      clearInterval(stateTimer);
       clearInterval(jitterTimer);
     };
   }, []);
@@ -589,7 +602,7 @@ export default function Dashboard() {
     setCrosswind(computeCrosswind(p.wind, activeRunway));
   }, [metar, taf, activeRunway]);
 
-  return (
+    return (
     <div
       className="min-h-screen bg-slate-950 text-slate-100 p-4"
       style={{ transform: `translate(${jitter.x}px, ${jitter.y}px)` }}
@@ -608,7 +621,8 @@ export default function Dashboard() {
           </p>
           <button
             onClick={() => {
-              fetchData();
+              fetchMetarTaf();
+              fetchNotams();
               fetchNavaids();
               fetchBash();
             }}
@@ -900,3 +914,4 @@ export default function Dashboard() {
     </div>
   );
 }
+
