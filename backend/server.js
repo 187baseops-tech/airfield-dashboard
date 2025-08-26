@@ -1,4 +1,4 @@
-import express from "express";
+import express from "express"; 
 import axios from "axios";
 import * as cheerio from "cheerio";
 import cors from "cors";
@@ -118,6 +118,21 @@ app.post("/api/state", (req, res) => {
 
 // NAVAIDs + BASH helpers
 app.get("/api/navaids", (req, res) => res.json(savedState.navaids));
+
+app.post("/api/navaids", (req, res) => {
+  const { name } = req.body;
+  if (!name || !Object.prototype.hasOwnProperty.call(savedState.navaids, name)) {
+    return res.status(400).json({ ok: false, error: "Invalid NAVAID name" });
+  }
+
+  // Cycle IN ↔ OUT
+  savedState.navaids[name] =
+    savedState.navaids[name] === "IN" ? "OUT" : "IN";
+
+  saveState();
+  res.json({ ok: true, navaids: savedState.navaids });
+});
+
 app.get("/api/bash", (req, res) => res.json(savedState.bash));
 
 // Slides + Annotations
