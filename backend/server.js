@@ -90,9 +90,10 @@ function initSwimListener() {
       setTimeout(() => consumer.connect(), 10000);
     });
 
+    // ---- Message Handler ----
     consumer.on(solace.MessageConsumerEventName.MESSAGE, (message) => {
       try {
-        let text = "";
+        let text = null;
 
         if (message.getBinaryAttachment()) {
           text = message.getBinaryAttachment().toString();
@@ -100,8 +101,14 @@ function initSwimListener() {
           text = message.getSdtContainer().getValue();
         } else if (message.getXmlContent()) {
           text = message.getXmlContent();
-        } else {
-          console.warn("⚠ Received SWIM message with no readable payload");
+        }
+
+        // Always log first 200 chars for debugging
+        console.log("🔎 SWIM raw message preview:", (text || "").slice(0, 200));
+
+        if (!text) {
+          console.warn("⚠ Received SWIM message with no text payload. Dumping partial object:");
+          console.log(JSON.stringify(message, null, 2).slice(0, 500));
           return;
         }
 
@@ -109,7 +116,7 @@ function initSwimListener() {
         let notamId = uuidv4();
 
         if (text.startsWith("<")) {
-          // crude XML -> text clean
+          // crude XML -> string clean
           notamText = text.replace(/<[^>]+>/g, "").trim().slice(0, 500);
         } else {
           try {
