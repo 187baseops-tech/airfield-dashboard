@@ -142,64 +142,10 @@ function SlidesCard() {
   const prevSlide = () => setCurrentSlide(s => (s - 1 + slides.length) % slides.length);
   const nextSlide = () => setCurrentSlide(s => (s + 1) % slides.length);
 
-  const handleClick = (e) => {
-    if (!tool || slides.length === 0) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const file = slides[currentSlide];
-    if (!file) return;
-
-    const slideKey = file;
-    const annots = { ...annotations };
-    if (!annots[slideKey]) annots[slideKey] = [];
-    if (tool === "x") annots[slideKey].push({ type: "x", x, y });
-    else if (tool === "text") {
-      const text = prompt("Enter note:");
-      if (text) annots[slideKey].push({ type: "text", x, y, text });
-    }
-    saveAnnotations(annots);
-  };
-
-  const handleDragStart = (e) => {
-    if (!tool || slides.length === 0) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    svgRef.current.dataset.startX = e.clientX - rect.left;
-    svgRef.current.dataset.startY = e.clientY - rect.top;
-  };
-
-  const handleDragEnd = (e) => {
-    if (!tool || slides.length === 0) return;
-    const rect = svgRef.current.getBoundingClientRect();
-    const x2 = e.clientX - rect.left;
-    const y2 = e.clientY - rect.top;
-    const x1 = parseFloat(svgRef.current.dataset.startX);
-    const y1 = parseFloat(svgRef.current.dataset.startY);
-    const file = slides[currentSlide];
-    if (!file) return;
-
-    const slideKey = file;
-    const annots = { ...annotations };
-    if (!annots[slideKey]) annots[slideKey] = [];
-    if (tool === "box") {
-      annots[slideKey].push({
-        type: "box",
-        x: Math.min(x1, x2),
-        y: Math.min(y1, y2),
-        w: Math.abs(x2 - x1),
-        h: Math.abs(y2 - y1)
-      });
-    } else if (tool === "arrow") {
-      annots[slideKey].push({ type: "arrow", x1, y1, x2, y2 });
-    }
-    saveAnnotations(annots);
-  };
-
   const clearAnnotations = () => {
     if (slides.length === 0) return;
     const file = slides[currentSlide];
     if (!file) return;
-
     const slideKey = file;
     const annots = { ...annotations, [slideKey]: [] };
     saveAnnotations(annots);
@@ -213,6 +159,38 @@ function SlidesCard() {
       </section>
     );
   }
+
+  const file = slides[currentSlide] || null;
+  const slideKey = file || "unknown";
+
+  return (
+    <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
+      <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
+
+      {file ? (
+        <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[400px]">
+          <img
+            src={`${API}/slides/${file}`} 
+            alt="Slide"
+            className="object-contain max-h-full max-w-full"
+          />
+        </div>
+      ) : (
+        <p className="text-slate-400">No slide selected.</p>
+      )}
+
+      {/* Controls */}
+      <div className="flex justify-center gap-2 mt-3">
+        <button onClick={prevSlide} className="px-3 py-1 bg-slate-700 rounded">⏮ Prev</button>
+        <button onClick={nextSlide} className="px-3 py-1 bg-slate-700 rounded">⏭ Next</button>
+        <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-slate-700 rounded">
+          {isPlaying ? "⏸ Pause" : "▶ Play"}
+        </button>
+        <button onClick={clearAnnotations} className="px-3 py-1 bg-red-600 rounded">🗑 Clear</button>
+      </div>
+    </section>
+  );
+}
 
   const file = slides[currentSlide] || null;
   const slideKey = file || "unknown";
