@@ -171,25 +171,13 @@ app.get("/api/taf", async (req, res) => {
   }
 });
 
-// State persistence
+// State persistence (unified)
 app.get("/api/state", (req, res) => res.json(savedState));
 app.post("/api/state", (req, res) => {
   savedState = { ...savedState, ...req.body };
   saveState();
   res.json({ ok: true, state: savedState });
 });
-
-// NAVAIDs + BASH
-app.get("/api/navaids", (req, res) => res.json(savedState.navaids));
-app.post("/api/navaids", (req, res) => {
-  const { name } = req.body;
-  if (name && savedState.navaids[name] !== undefined) {
-    savedState.navaids[name] = savedState.navaids[name] === "IN" ? "OUT" : "IN";
-    saveState();
-  }
-  res.json({ navaids: savedState.navaids });
-});
-app.get("/api/bash", (req, res) => res.json(savedState.bash));
 
 // Slides + Annotations
 app.use("/slides", express.static(SLIDES_DIR));
