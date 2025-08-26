@@ -65,24 +65,24 @@ async function fetchNotams(icao = "KMGM") {
     const $ = cheerio.load(html);
     const notams = [];
 
-    // Grab all text inside the NOTAMs container
-    $("#notams, div#notams, section#notams")
-      .find("li, p, pre, div, a")
-      .each((_, el) => {
-        const text = $(el).text().trim();
-        if (!text) return;
+    // Look for <pre> blocks inside #notams (primary container)
+    $("#notams pre, #notams li, #notams p").each((_, el) => {
+      const text = $(el).text().trim();
+      if (!text) return;
 
-        const cleaned = text
-          .replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)")
-          .replace(/\s?NOTAMN/g, "")
-          .trim();
+      const cleaned = text
+        .replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)")
+        .replace(/\s?NOTAMN/g, "")
+        .trim();
 
-        // ID = NOTAM number if found, otherwise slice of text
-        const match = cleaned.match(/(M?\d{3,4}\/\d{2}|\d{2}\/\d{3,4}|!\w{3}\s+\d{2}\/\d{3,4})/);
-        const id = match ? match[0] : cleaned.slice(0, 20);
+      // Extract NOTAM ID (FAA style or ICAO style)
+      const match = cleaned.match(
+        /(M?\d{3,4}\/\d{2}|\d{2}\/\d{3,4}|!\w{3}\s+\d{2}\/\d{3,4}|NOTAM\s+\d{1,4}\/\d{2})/
+      );
+      const id = match ? match[0] : cleaned.slice(0, 20);
 
-        notams.push({ id, text: cleaned });
-      });
+      notams.push({ id, text: cleaned });
+    });
 
     console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
     return notams;
