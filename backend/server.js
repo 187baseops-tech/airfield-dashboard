@@ -65,22 +65,26 @@ async function fetchNotams(icao = "KMGM") {
     const $ = cheerio.load(html);
     const notams = [];
 
-    $("a[id^=notam-], div#notams a, div#notams li").each((_, el) => {
-      const text = $(el).text().trim();
-      if (!text) return;
+    // Grab all text inside the NOTAMs container
+    $("#notams, div#notams, section#notams")
+      .find("li, p, pre, div, a")
+      .each((_, el) => {
+        const text = $(el).text().trim();
+        if (!text) return;
 
-      const cleaned = text
-        .replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)")
-        .replace(/\s?NOTAMN/g, "")
-        .trim();
+        const cleaned = text
+          .replace(/Montgomery Regional.*?\(KMGM\)/gi, "(KMGM)")
+          .replace(/\s?NOTAMN/g, "")
+          .trim();
 
-      const match = cleaned.match(/(M?\d{3,4}\/\d{2}|\d{2}\/\d{3,4})/);
-      const id = match ? match[0] : cleaned.slice(0, 12);
+        // ID = NOTAM number if found, otherwise slice of text
+        const match = cleaned.match(/(M?\d{3,4}\/\d{2}|\d{2}\/\d{3,4}|!\w{3}\s+\d{2}\/\d{3,4})/);
+        const id = match ? match[0] : cleaned.slice(0, 20);
 
-      notams.push({ id, text: cleaned });
-    });
+        notams.push({ id, text: cleaned });
+      });
 
-    console.log(`✅ Found ${notams.length} NOTAMs`);
+    console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
     return notams;
   } catch (err) {
     console.error("❌ NOTAM scrape failed:", err.message);
