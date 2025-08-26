@@ -484,19 +484,25 @@ function CrosswindVisual({ wind }) {
   const spd = parseInt(match[2], 10);
   if (!spd) return null;
 
-  // Runway heading (east-west): we'll use 100° for RWY 10
+  // Runway heading (east-west): RWY 10 = 100°
   const runwayHeading = 100;
 
-  // Wind FROM direction (as given by METAR)
-  const angleRad = (dir * Math.PI) / 180;
+  // Wind FROM direction (rotate 180° so arrow points FROM source)
+  const angleRad = ((dir + 180) * Math.PI) / 180;
 
-  // Relative angle between wind and runway
+  // Relative angle for cross/headwind calc
   const rel = ((dir - runwayHeading + 360) % 360) * (Math.PI / 180);
   const headwind = (spd * Math.cos(rel)).toFixed(0);
   const crosswind = (spd * Math.sin(rel)).toFixed(0);
 
   return (
     <div className="absolute top-2 right-2 flex flex-col items-center text-xs">
+      {/* Labels ABOVE the runway */}
+      <div className="flex flex-row gap-4 mb-1 text-white text-xs font-bold">
+        <span>HW: {headwind} KT</span>
+        <span>XW: {crosswind} KT</span>
+      </div>
+
       <svg width="100" height="100" viewBox="0 0 200 200">
         {/* Runway rectangle east-west */}
         <rect x="40" y="90" width="120" height="20" fill="#555" rx="3" />
@@ -523,7 +529,7 @@ function CrosswindVisual({ wind }) {
           10
         </text>
 
-        {/* Wind arrow (points FROM direction) */}
+        {/* Wind arrow (points FROM wind dir) */}
         <line
           x1="100"
           y1="100"
@@ -547,12 +553,6 @@ function CrosswindVisual({ wind }) {
           </marker>
         </defs>
       </svg>
-
-      {/* Labels side-by-side above */}
-      <div className="flex flex-row gap-4 mt-1 text-white text-xs">
-        <span>HW: {headwind} KT</span>
-        <span>XW: {crosswind} KT</span>
-      </div>
     </div>
   );
 }
