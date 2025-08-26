@@ -92,16 +92,39 @@ function initSwimListener() {
 
     consumer.on(solace.MessageConsumerEventName.MESSAGE, (message) => {
       try {
-        const text = message.getBinaryAttachment().toString();
-        const json = JSON.parse(text);
+        let text = "";
 
-        notamsBuffer.unshift({
-          id: json.notamNumber || json.id || uuidv4(),
-          text: json.rawText || text,
-        });
+        if (message.getBinaryAttachment()) {
+          text = message.getBinaryAttachment().toString();
+        } else if (message.getSdtContainer()) {
+          text = message.getSdtContainer().getValue();
+        } else if (message.getXmlContent()) {
+          text = message.getXmlContent();
+        } else {
+          console.warn("⚠ Received SWIM message with no readable payload");
+          return;
+        }
 
+        let notamText = text;
+        let notamId = uuidv4();
+
+        if (text.startsWith("<")) {
+          // crude XML -> text clean
+          notamText = text.replace(/<[^>]+>/g, "").trim().slice(0, 500);
+        } else {
+          try {
+            const json = JSON.parse(text);
+            notamId = json.notamNumber || json.id || notamId;
+            notamText = json.rawText || text;
+          } catch {
+            // leave as-is
+          }
+        }
+
+        notamsBuffer.unshift({ id: notamId, text: notamText });
         if (notamsBuffer.length > 100) notamsBuffer.pop();
-        console.log(`📥 New NOTAM from SWIM: ${json.notamNumber || "unknown"}`);
+
+        console.log(`📥 New NOTAM from SWIM: ${notamId}`);
       } catch (err) {
         console.error("❌ Failed to parse SWIM message:", err.message);
       }
