@@ -70,25 +70,45 @@ function initSwimListener() {
 
   session.on(solace.SessionEventCode.UP_NOTICE, () => {
     console.log("✅ Connected to FAA SWIM via Solace");
-    const queueDescriptor = new solace.QueueDescriptor(process.env.SWIM_QUEUE);
-    session.subscribeQueue(queueDescriptor, true, "SWIM_SUB", 10000);
-  });
 
-  session.on(solace.SessionEventCode.MESSAGE, (message) => {
-    try {
-      const text = message.getBinaryAttachment().toString();
-      const json = JSON.parse(text);
+    // Create consumer for queue
+    const consumer = session.createMessageConsumer({
+      queueDescriptor: { name: process.env.SWIM_QUEUE, type: solace.QueueType.QUEUE },
+      acknowledgeMode: solace.MessageConsumerAcknowledgeMode.AUTO,
+    });
 
-      notamsBuffer.unshift({
-        id: json.notamNumber || json.id || uuidv4(),
-        text: json.rawText || text,
-      });
+    consumer.on(solace.MessageConsumerEventName.UP, () => {
+      console.log(`✅ Bound to SWIM queue: ${process.env.SWIM_QUEUE}`);
+    });
 
-      if (notamsBuffer.length > 100) notamsBuffer.pop(); // keep recent 100
-      console.log(`📥 New NOTAM from SWIM: ${json.notamNumber || "unknown"}`);
-    } catch (err) {
-      console.error("❌ Failed to parse SWIM message:", err.message);
-    }
+    consumer.on(solace.MessageConsumerEventName.CONNECT_FAILED_ERROR, (err) => {
+      console.error("❌ SWIM consumer connection failed:", err.infoStr || err);
+    });
+
+    consumer.on(solace.MessageConsumerEventName.DOWN, () => {
+      console.warn("⚠ SWIM consumer went down, reconnecting...");
+      setTimeout(() => consumer.connect(), 10000);
+    });
+
+    consumer.on(solace.MessageConsumerEventName.MESSAGE, (message) => {
+      try {
+        const text = message.getBinaryAttachment().toString();
+        const json = JSON.parse(text);
+
+        notamsBuffer.unshift({
+          id: json.notamNumber || json.id || uuidv4(),
+          text: json.rawText || text,
+        });
+
+        if (notamsBuffer.length > 100) notamsBuffer.pop();
+        console.log(`📥 New NOTAM from SWIM: ${json.notamNumber || "unknown"}`);
+      } catch (err) {
+        console.error("❌ Failed to parse SWIM message:", err.message);
+      }
+    });
+
+    // Connect consumer
+    consumer.connect();
   });
 
   session.on(solace.SessionEventCode.CONNECT_FAILED_ERROR, (e) => {
@@ -96,7 +116,7 @@ function initSwimListener() {
   });
 
   session.on(solace.SessionEventCode.DISCONNECTED, () => {
-    console.warn("⚠ SWIM disconnected, retrying in 10s...");
+    console.warn("⚠ SWIM session disconnected, retrying in 10s...");
     setTimeout(initSwimListener, 10000);
   });
 
@@ -148,7 +168,7 @@ app.get("/api/notams", async (req, res) => {
   res.json({ notams: fallback });
 });
 
-// Weather stubs (still NOAA hookup possible)
+// Weather stubs
 app.get("/api/metar", (req, res) => {
   const icao = req.query.icao || "KMGM";
   res.json({ raw: `${icao} 261553Z AUTO 00000KT 10SM CLR 30/18 A2992 RMK AO2` });
