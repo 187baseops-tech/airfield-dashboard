@@ -364,12 +364,11 @@ export default function Dashboard() {
         : 99999;
     setCat(flightCat(ceilFt, visMiles));
 
-    const tempMatch = p.tempdew?.match(/(M?\d{2})\/(M?\d{2})/);
-    if (tempMatch) {
-      const tC = parseInt(tempMatch[1].replace("M", "-"));
-      const tdC = parseInt(tempMatch[2].replace("M", "-"));
-      setFits(computeFits(tC, tdC));
-    }
+   const tempMatch = p.tempdew?.match(/(M?\d{2})\/(M?\d{2})/);
+   if (tempMatch) {
+   const tC = parseInt(tempMatch[1].replace("M", "-")); // dry bulb °C
+   setFits(computeFits(tC));
+}
 
     let altNeeded = false;
     if (
@@ -607,7 +606,7 @@ export default function Dashboard() {
                 }`}
               >
                 {fits.level}{" "}
-                {Number.isFinite(fits.wbgt) && `(${fits.wbgt} °F WBGT)`}
+                {Number.isFinite(fits.tempF) && `(${fits.tempF} °F Dry Bulb)`}
               </span>
             </div>
           </div>
