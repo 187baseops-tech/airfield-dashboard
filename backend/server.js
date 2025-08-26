@@ -5,8 +5,8 @@ import cors from "cors";
 import https from "https";
 import fs from "fs";
 import path from "path";
-import solace from "solclientjs";
 import { v4 as uuidv4 } from "uuid";
+import solace from "solclientjs";
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -50,113 +50,8 @@ function saveState() {
 const SLIDES_DIR = path.join(process.cwd(), "../data/slides");
 const ANNOT_FILE = path.join(SLIDES_DIR, "annotations.json");
 
-// ---- NOTAM Buffer (live from SWIM) ----
-const notamsBuffer = [];
-
-// ---- Init SWIM Solace Listener ----
-function initSwimListener() {
-  console.log("🌐 Initializing SWIM Solace listener...");
-
-  const factoryProps = new solace.SolclientFactoryProperties();
-  factoryProps.logLevel = solace.LogLevel.WARN;
-  solace.SolclientFactory.init(factoryProps);
-
-  const session = solace.SolclientFactory.createSession({
-    url: process.env.SOLACE_HOST,
-    vpnName: process.env.SOLACE_VPN,
-    userName: process.env.SOLACE_USERNAME,
-    password: process.env.SOLACE_PASSWORD,
-  });
-
-  session.on(solace.SessionEventCode.UP_NOTICE, () => {
-    console.log("✅ Connected to FAA SWIM via Solace");
-
-    // Create consumer for queue
-    const consumer = session.createMessageConsumer({
-      queueDescriptor: { name: process.env.SWIM_QUEUE, type: solace.QueueType.QUEUE },
-      acknowledgeMode: solace.MessageConsumerAcknowledgeMode.AUTO,
-    });
-
-    consumer.on(solace.MessageConsumerEventName.UP, () => {
-      console.log(`✅ Bound to SWIM queue: ${process.env.SWIM_QUEUE}`);
-    });
-
-    consumer.on(solace.MessageConsumerEventName.CONNECT_FAILED_ERROR, (err) => {
-      console.error("❌ SWIM consumer connection failed:", err.infoStr || err);
-    });
-
-    consumer.on(solace.MessageConsumerEventName.DOWN, () => {
-      console.warn("⚠ SWIM consumer went down, reconnecting...");
-      setTimeout(() => consumer.connect(), 10000);
-    });
-
-    // ---- Message Handler ----
-    consumer.on(solace.MessageConsumerEventName.MESSAGE, (message) => {
-      try {
-        let text = null;
-
-        if (message.getBinaryAttachment()) {
-          text = message.getBinaryAttachment().toString();
-        } else if (message.getSdtContainer()) {
-          text = message.getSdtContainer().getValue();
-        } else if (message.getXmlContent()) {
-          text = message.getXmlContent();
-        }
-
-        // Always log first 200 chars for debugging
-        console.log("🔎 SWIM raw message preview:", (text || "").slice(0, 200));
-
-        if (!text) {
-          console.warn("⚠ Received SWIM message with no text payload. Dumping partial object:");
-          console.log(JSON.stringify(message, null, 2).slice(0, 500));
-          return;
-        }
-
-        let notamText = text;
-        let notamId = uuidv4();
-
-        if (text.startsWith("<")) {
-          // crude XML -> string clean
-          notamText = text.replace(/<[^>]+>/g, "").trim().slice(0, 500);
-        } else {
-          try {
-            const json = JSON.parse(text);
-            notamId = json.notamNumber || json.id || notamId;
-            notamText = json.rawText || text;
-          } catch {
-            // leave as-is
-          }
-        }
-
-        notamsBuffer.unshift({ id: notamId, text: notamText });
-        if (notamsBuffer.length > 100) notamsBuffer.pop();
-
-        console.log(`📥 New NOTAM from SWIM: ${notamId}`);
-      } catch (err) {
-        console.error("❌ Failed to parse SWIM message:", err.message);
-      }
-    });
-
-    // Connect consumer
-    consumer.connect();
-  });
-
-  session.on(solace.SessionEventCode.CONNECT_FAILED_ERROR, (e) => {
-    console.error("❌ SWIM connection failed:", e.infoStr);
-  });
-
-  session.on(solace.SessionEventCode.DISCONNECTED, () => {
-    console.warn("⚠ SWIM session disconnected, retrying in 10s...");
-    setTimeout(initSwimListener, 10000);
-  });
-
-  session.connect();
-}
-
-initSwimListener();
-
-// ---- OurAirports fallback scraper ----
-async function fetchNotamsFallback(icao = "KMGM") {
+// ---- OurAirports NOTAM Scraper ----
+async function fetchNotams(icao = "KMGM") {
   try {
     console.log(`🌐 Scraping OurAirports for ${icao}...`);
     const httpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -167,21 +62,90 @@ async function fetchNotamsFallback(icao = "KMGM") {
 
     const $ = cheerio.load(html);
     const notams = [];
+
     $("section[id^=notam-]").each((_, el) => {
       const header = $(el).find("h3").text().trim();
       const body = $(el).find("p.notam").text().trim();
       if (!header || !body) return;
 
-      const id = header.slice(0, 20);
-      notams.push({ id, text: `${id}\n${body}` });
+      const idMatch = header.match(
+        /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
+      );
+      const id = idMatch ? idMatch[0] : header.slice(0, 20);
+
+      const text = `${id}\n${body}`;
+      notams.push({ id, text });
     });
 
     console.log(`✅ Retrieved ${notams.length} NOTAMs from OurAirports`);
     return notams;
   } catch (err) {
-    console.error("❌ Fallback OurAirports scrape failed:", err.message);
+    console.error("❌ OurAirports scrape failed:", err.message);
     return [];
   }
+}
+
+// ---- FAA SWIM via Solace ----
+let latestNotams = [];
+
+function initSwim() {
+  console.log("🌐 Initializing SWIM Solace listener...");
+
+  solace.SolclientFactory.init({
+    profile: solace.SolclientFactoryProfiles.version10,
+  });
+
+  const factoryProps = new solace.SolclientFactoryProperties();
+  const sessionProps = {
+    url: process.env.SOLACE_HOST,
+    vpnName: process.env.SOLACE_VPN,
+    userName: process.env.SOLACE_USERNAME,
+    password: process.env.SOLACE_PASSWORD,
+  };
+
+  const session = solace.SolclientFactory.createSession(sessionProps);
+
+  session.on(solace.SessionEventCode.UP_NOTICE, () => {
+    console.log("✅ Connected to FAA SWIM via Solace");
+    const consumer = session.createMessageConsumer({
+      queueDescriptor: { name: process.env.SWIM_QUEUE, type: solace.QueueType.QUEUE },
+      acknowledgeMode: solace.MessageConsumerAcknowledgeMode.AUTO,
+    });
+
+    consumer.on(solace.MessageConsumerEventName.UP, () => {
+      console.log(`✅ Bound to SWIM queue: ${process.env.SWIM_QUEUE}`);
+    });
+
+    consumer.on(solace.MessageConsumerEventName.MESSAGE, (message) => {
+      try {
+        let text = null;
+        if (message.getBinaryAttachment()) {
+          text = message.getBinaryAttachment().toString();
+        } else if (message.getXmlContent()) {
+          text = message.getXmlContent();
+        }
+
+        console.log("🔎 SWIM raw preview:", (text || "").slice(0, 200));
+
+        if (text && /KMGM/.test(text)) {
+          const notamId = uuidv4();
+          latestNotams.unshift({ id: notamId, text });
+          if (latestNotams.length > 100) latestNotams.pop();
+          console.log(`📥 KMGM NOTAM from SWIM: ${notamId}`);
+        }
+      } catch (err) {
+        console.error("❌ Failed to parse SWIM message:", err.message);
+      }
+    });
+
+    consumer.connect();
+  });
+
+  session.on(solace.SessionEventCode.CONNECT_FAILED_ERROR, (e) => {
+    console.error("❌ SWIM Solace connect failed:", e.infoStr);
+  });
+
+  session.connect();
 }
 
 // ---- Routes ----
@@ -189,19 +153,18 @@ app.get("/", (req, res) => res.send("✅ Airfield Dashboard Backend running"));
 
 // NOTAMs
 app.get("/api/notams", async (req, res) => {
-  if (notamsBuffer.length > 0) {
-    console.log(`🚀 Serving ${notamsBuffer.length} NOTAMs from SWIM`);
-    return res.json({ notams: notamsBuffer });
+  let out = latestNotams;
+  if (!out || out.length === 0) {
+    console.log("⚠️ No SWIM NOTAMs, falling back to OurAirports scrape...");
+    out = await fetchNotams("KMGM");
   }
-  const icao = req.query.icao || "KMGM";
-  const fallback = await fetchNotamsFallback(icao);
-  res.json({ notams: fallback });
+  res.json({ notams: out });
 });
 
-// Weather stubs
+// Weather stubs (you probably already hooked to NOAA)
 app.get("/api/metar", (req, res) => {
   const icao = req.query.icao || "KMGM";
-  res.json({ raw: `${icao} 261553Z AUTO 00000KT 10SM CLR 30/18 A2992 RMK AO2` });
+  res.json({ raw: `${icao} 261755Z AUTO 00000KT 10SM CLR 30/18 A2992 RMK AO2` });
 });
 app.get("/api/taf", (req, res) => {
   const icao = req.query.icao || "KMGM";
@@ -216,21 +179,12 @@ app.post("/api/state", (req, res) => {
   res.json({ ok: true, state: savedState });
 });
 
-// NAVAIDs + BASH helpers
+// NAVAIDs + BASH
 app.get("/api/navaids", (req, res) => res.json(savedState.navaids));
-app.post("/api/navaids", (req, res) => {
-  const { name } = req.body;
-  if (name && savedState.navaids[name] !== undefined) {
-    savedState.navaids[name] = savedState.navaids[name] === "IN" ? "OUT" : "IN";
-    saveState();
-  }
-  res.json({ navaids: savedState.navaids });
-});
 app.get("/api/bash", (req, res) => res.json(savedState.bash));
 
 // Slides + Annotations
 app.use("/slides", express.static(SLIDES_DIR));
-
 app.get("/api/slides", (req, res) => {
   try {
     if (!fs.existsSync(SLIDES_DIR)) return res.json([]);
@@ -242,7 +196,6 @@ app.get("/api/slides", (req, res) => {
     res.json([]);
   }
 });
-
 app.get("/api/annotations", (req, res) => {
   if (fs.existsSync(ANNOT_FILE)) {
     try {
@@ -255,7 +208,6 @@ app.get("/api/annotations", (req, res) => {
     res.json({ slides: {} });
   }
 });
-
 app.post("/api/annotations", (req, res) => {
   try {
     fs.writeFileSync(ANNOT_FILE, JSON.stringify(req.body, null, 2));
@@ -269,4 +221,5 @@ app.post("/api/annotations", (req, res) => {
 // ---- Start ----
 app.listen(PORT, () => {
   console.log(`🚀 Backend listening on port ${PORT}`);
+  initSwim();
 });
