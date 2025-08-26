@@ -478,8 +478,6 @@ function SlidesCard() {
   );
 }
 
-export default SlidesCard;
-
 // --- Main Dashboard ---
 function CrosswindVisual({ wind, runway }) {
   if (!wind || wind === "--") return null;
