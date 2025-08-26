@@ -474,7 +474,7 @@ function SlidesCard() {
 }
 
 // --- Main Dashboard ---
-function CrosswindVisual({ wind, runway }) {
+function CrosswindVisual({ wind }) {
   if (!wind || wind === "--") return null;
 
   const match = wind.match(/(\d{3}|VRB)(\d{2})/);
@@ -484,38 +484,51 @@ function CrosswindVisual({ wind, runway }) {
   const spd = parseInt(match[2], 10);
   if (!spd) return null;
 
-  const runwayHeading = runway === "10" ? 100 : 280;
+  // Runway heading east-west (10 = 100°, 28 = 280°)
+  const runwayHeading = 100; // reference to runway 10
+  const windFrom = dir + 180; // arrow points FROM wind source
 
-  // FIX: Flip 180° so arrow points FROM wind direction
-  const angleRad = (((dir + 180) - runwayHeading) * Math.PI) / 180;
+  // Relative angle
+  const angleRad = ((windFrom - runwayHeading) * Math.PI) / 180;
 
+  // Components
   const headwind = (spd * Math.cos(angleRad)).toFixed(0);
   const crosswind = (spd * Math.sin(angleRad)).toFixed(0);
 
   return (
     <div className="absolute top-2 right-2 flex flex-col items-center text-xs">
-      <svg width="60" height="60" viewBox="0 0 120 120">
-        {/* Runway rectangle */}
-        <rect x="50" y="20" width="20" height="80" fill="#555" rx="3" />
+      <svg width="100" height="100" viewBox="0 0 200 200">
+        {/* Runway rectangle east-west */}
+        <rect x="40" y="90" width="120" height="20" fill="#555" rx="3" />
 
-        {/* Runway number */}
+        {/* Runway numbers */}
         <text
-          x="60"
-          y="110"
-          fontSize="10"
+          x="45"
+          y="85"
+          fontSize="14"
           fill="white"
           textAnchor="middle"
           fontWeight="bold"
         >
-          {runway}
+          28
+        </text>
+        <text
+          x="155"
+          y="85"
+          fontSize="14"
+          fill="white"
+          textAnchor="middle"
+          fontWeight="bold"
+        >
+          10
         </text>
 
         {/* Wind arrow */}
         <line
-          x1="60"
-          y1="60"
-          x2={60 + 30 * Math.sin(angleRad)}
-          y2={60 - 30 * Math.cos(angleRad)}
+          x1="100"
+          y1="100"
+          x2={100 + 40 * Math.sin(angleRad)}
+          y2={100 - 40 * Math.cos(angleRad)}
           stroke="green"
           strokeWidth="3"
           markerEnd="url(#arrowhead)"
