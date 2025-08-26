@@ -116,7 +116,10 @@ function SlidesCard() {
   const [drawing, setDrawing] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [imageObj, setImageObj] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
   const containerRef = useRef();
+  const stageRef = useRef();
+  const trRef = useRef();
   const [stageSize, setStageSize] = useState({ width: 800, height: 400 });
 
   const API =
@@ -160,6 +163,17 @@ function SlidesCard() {
     }
   }, [isPlaying, slides.length]);
 
+  // transformer update when selection changes
+  useEffect(() => {
+    if (trRef.current && stageRef.current && selectedId) {
+      const shape = stageRef.current.findOne(`#${selectedId}`);
+      if (shape) {
+        trRef.current.nodes([shape]);
+        trRef.current.getLayer().batchDraw();
+      }
+    }
+  }, [selectedId, annotations]);
+
   const saveAnnotations = (updated) => {
     setAnnotations(updated);
     axios.post(`${API}/api/annotations`, { slides: updated });
@@ -184,11 +198,23 @@ function SlidesCard() {
     saveAnnotations(annots);
   };
 
+  const deleteAnnotation = (id) => {
+    const file = slides[currentSlide];
+    if (!file) return;
+    const annots = { ...annotations };
+    annots[file] = annots[file].filter((a) => a._id !== id);
+    saveAnnotations(annots);
+    setSelectedId(null);
+    trRef.current?.nodes([]);
+  };
+
   const clearAllAnnotations = () => {
     const file = slides[currentSlide];
     if (!file) return;
     const annots = { ...annotations, [file]: [] };
     saveAnnotations(annots);
+    setSelectedId(null);
+    trRef.current?.nodes([]);
   };
 
   if (slides.length === 0) {
@@ -219,7 +245,6 @@ function SlidesCard() {
     offsetY = (stageSize.height - drawH) / 2;
   }
 
-  // migration helper
   const migrate = (val, axis = "x") => {
     if (!imageObj) return val;
     return val < (axis === "x" ? imageObj.width : imageObj.height)
@@ -228,15 +253,27 @@ function SlidesCard() {
   };
 
   return (
-    <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
+    <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2 relative">
       <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
+
+      {isFullscreen && (
+        <button
+          onClick={() => setIsFullscreen(false)}
+          className="absolute top-2 right-2 px-3 py-1 bg-red-600 rounded z-50"
+        >
+          ✖ Close
+        </button>
+      )}
 
       {file && imageObj ? (
         <div
           ref={containerRef}
-          className="relative flex-1 bg-slate-900 rounded overflow-hidden h-[400px]"
+          className={`relative flex-1 bg-slate-900 rounded overflow-hidden ${
+            isFullscreen ? "fixed inset-0 z-40" : "h-[400px]"
+          }`}
         >
           <Stage
+            ref={stageRef}
             width={stageSize.width}
             height={stageSize.height}
             onMouseDown={(e) => {
@@ -293,10 +330,27 @@ function SlidesCard() {
                 const ax = migrate(a.x, "x");
                 const ay = migrate(a.y, "y");
 
+                const commonProps = {
+                  key: a._id,
+                  id: a._id,
+                  draggable: true,
+                  onClick: () => setSelectedId(a._id),
+                  onTap: () => setSelectedId(a._id),
+                  onContextMenu: (e) => {
+                    e.evt.preventDefault();
+                    deleteAnnotation(a._id);
+                  },
+                  onDragEnd: (e) => {
+                    const imgX = (e.target.x() - offsetX) / scale;
+                    const imgY = (e.target.y() - offsetY) / scale;
+                    updateAnnotation(a._id, { x: imgX, y: imgY });
+                  },
+                };
+
                 if (a.type === "box")
                   return (
                     <Rect
-                      key={a._id}
+                      {...commonProps}
                       x={offsetX + ax * scale}
                       y={offsetY + ay * scale}
                       width={a.w * scale}
@@ -307,7 +361,7 @@ function SlidesCard() {
                 if (a.type === "x")
                   return (
                     <KText
-                      key={a._id}
+                      {...commonProps}
                       x={offsetX + ax * scale}
                       y={offsetY + ay * scale}
                       text="X"
@@ -318,7 +372,7 @@ function SlidesCard() {
                 if (a.type === "arrow")
                   return (
                     <Arrow
-                      key={a._id}
+                      {...commonProps}
                       points={[
                         offsetX + migrate(a.x1, "x") * scale,
                         offsetY + migrate(a.y1, "y") * scale,
@@ -334,7 +388,7 @@ function SlidesCard() {
                 if (a.type === "text")
                   return (
                     <KText
-                      key={a._id}
+                      {...commonProps}
                       x={offsetX + ax * scale}
                       y={offsetY + ay * scale}
                       text={a.text}
@@ -344,6 +398,34 @@ function SlidesCard() {
                   );
                 return null;
               })}
+
+              {drawing?.type === "box" && (
+                <Rect
+                  x={offsetX + drawing.x * scale}
+                  y={offsetY + drawing.y * scale}
+                  width={drawing.w * scale}
+                  height={drawing.h * scale}
+                  stroke="red"
+                  dash={[4, 4]}
+                />
+              )}
+              {drawing?.type === "arrow" && (
+                <Arrow
+                  points={[
+                    offsetX + drawing.x1 * scale,
+                    offsetY + drawing.y1 * scale,
+                    offsetX + drawing.x2 * scale,
+                    offsetY + drawing.y2 * scale,
+                  ]}
+                  stroke="green"
+                  strokeWidth={4 * scale}
+                  pointerLength={10 * scale}
+                  pointerWidth={10 * scale}
+                  dash={[4, 4]}
+                />
+              )}
+
+              <Transformer ref={trRef} rotateEnabled resizeEnabled />
             </Layer>
           </Stage>
         </div>
@@ -370,8 +452,6 @@ function SlidesCard() {
     </section>
   );
 }
-
-
 
 // --- Main Dashboard ---
 function CrosswindVisual({ wind, runway }) {
