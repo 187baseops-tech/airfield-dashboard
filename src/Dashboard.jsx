@@ -96,6 +96,7 @@ function SlidesCard() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [drawing, setDrawing] = useState(null); // temp shape while dragging
+  const [largeView, setLargeView] = useState(false); // toggle for larger slide
   const trRef = useRef();
 
   const API =
@@ -153,6 +154,16 @@ function SlidesCard() {
     annots[slideKey] = annots[slideKey].filter((a) => a._id !== id);
     saveAnnotations(annots);
     setSelectedId(null);
+    setDrawing(null); // clear preview
+  };
+
+  const clearAll = () => {
+    const file = slides[currentSlide];
+    if (!file) return;
+    const slideKey = file;
+    saveAnnotations({ ...annotations, [slideKey]: [] });
+    setSelectedId(null);
+    setDrawing(null);
   };
 
   useEffect(() => {
@@ -177,20 +188,25 @@ function SlidesCard() {
   const file = slides[currentSlide] || null;
   const slideKey = file || "unknown";
 
+  // Slide size toggle
+  const stageWidth = largeView ? 1200 : 800;
+  const stageHeight = largeView ? 600 : 400;
+
   return (
     <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
       <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
 
       {file ? (
-        <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[400px]">
+        <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden"
+             style={{ height: stageHeight }}>
           <img
             src={`${API}/slides/${file}`}
             alt="Slide"
             className="object-contain max-h-full max-w-full"
           />
           <Stage
-            width={800}
-            height={400}
+            width={stageWidth}
+            height={stageHeight}
             className="absolute inset-0 w-full h-full"
             onMouseDown={(e) => {
               if (!tool || e.target !== e.target.getStage()) return;
@@ -276,8 +292,9 @@ function SlidesCard() {
                       points={[a.x1, a.y1, a.x2, a.y2]}
                       stroke="green"
                       strokeWidth={4}
-                      pointerLength={10}
-                      pointerWidth={10}
+                      pointerAtEnding={true}
+                      pointerLength={12}
+                      pointerWidth={12}
                     />
                   );
                 } else if (a.type === "text") {
@@ -327,8 +344,9 @@ function SlidesCard() {
                   points={[drawing.x1, drawing.y1, drawing.x2, drawing.y2]}
                   stroke="green"
                   strokeWidth={4}
-                  pointerLength={10}
-                  pointerWidth={10}
+                  pointerAtEnding={true}
+                  pointerLength={12}
+                  pointerWidth={12}
                   dash={[4, 4]}
                 />
               )}
@@ -362,6 +380,18 @@ function SlidesCard() {
           className="px-3 py-1 bg-slate-700 rounded"
         >
           {isPlaying ? "⏸ Pause" : "▶ Play"}
+        </button>
+        <button
+          onClick={clearAll}
+          className="px-3 py-1 bg-red-600 rounded"
+        >
+          🗑 Clear All
+        </button>
+        <button
+          onClick={() => setLargeView(!largeView)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
+          {largeView ? "🔎 Reduce" : "🔎 Enlarge"}
         </button>
       </div>
 
