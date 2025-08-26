@@ -313,6 +313,83 @@ function SlidesCard() {
   );
 }
 // --- Main Dashboard ---
+function CrosswindVisual({ wind, runway }) {
+  if (!wind || wind === "--") return null;
+
+  // Parse wind group (e.g., 03007KT → dir=030, spd=07)
+  const match = wind.match(/(\d{3}|VRB)(\d{2})/);
+  if (!match) return null;
+
+  const dir = match[1] === "VRB" ? 0 : parseInt(match[1], 10);
+  const spd = parseInt(match[2], 10);
+  if (!spd) return null;
+
+  // Runway heading in degrees
+  const runwayHeading = runway === "10" ? 100 : 280;
+
+  // Wind relative angle
+  const angleRad = ((dir - runwayHeading) * Math.PI) / 180;
+
+  // Compute headwind + crosswind
+  const headwind = (spd * Math.cos(angleRad)).toFixed(1);
+  const crosswind = (spd * Math.sin(angleRad)).toFixed(1);
+
+  // Crosswind severity color
+  const crosswindClass =
+    Math.abs(crosswind) >= 25 ? "text-red-500 font-bold" : "text-green-400 font-bold";
+
+  return (
+    <div className="mt-3 flex flex-col items-center text-sm border-t border-slate-700 pt-2">
+      <svg width="120" height="120" viewBox="0 0 120 120" className="mb-1">
+        {/* Runway rectangle */}
+        <rect x="50" y="10" width="20" height="100" fill="#555" rx="3" />
+
+        {/* Runway number (dynamic) */}
+        <text
+          x="60"
+          y="115"
+          fontSize="12"
+          fill="white"
+          textAnchor="middle"
+          alignmentBaseline="middle"
+          fontWeight="bold"
+        >
+          {runway}
+        </text>
+
+        {/* Wind arrow */}
+        <line
+          x1="60"
+          y1="60"
+          x2={60 + 40 * Math.sin(angleRad)}
+          y2={60 - 40 * Math.cos(angleRad)}
+          stroke="red"
+          strokeWidth="3"
+          markerEnd="url(#arrowhead)"
+        />
+
+        {/* Arrowhead definition */}
+        <defs>
+          <marker
+            id="arrowhead"
+            markerWidth="6"
+            markerHeight="6"
+            refX="5"
+            refY="3"
+            orient="auto"
+          >
+            <polygon points="0 0, 6 3, 0 6" fill="red" />
+          </marker>
+        </defs>
+      </svg>
+
+      {/* Labels */}
+      <p>Wind: {wind}</p>
+      <p>Headwind: {headwind} KT</p>
+      <p className={crosswindClass}>Crosswind: {crosswind} KT</p>
+    </div>
+  );
+}
 export default function Dashboard() {
   const ICAO = "KMGM";
 
@@ -717,81 +794,84 @@ export default function Dashboard() {
         </section>
 
         {/* Weather */}
-        <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
-          <div className="flex items-center gap-2 mb-2">
-            <h2 className="text-lg font-bold underline">WEATHER</h2>
-            <span
-              className={`px-3 py-1 rounded-full text-lg font-bold ${
-                cat === "VFR"
-                  ? "bg-green-600"
-                  : cat === "MVFR"
-                  ? "bg-blue-600"
-                  : cat === "IFR"
-                  ? "bg-red-600"
-                  : "bg-fuchsia-700"
-              }`}
-            >
-              {cat}
-            </span>
-            {altReq && (
-              <span className="px-3 py-1 rounded-full text-lg font-bold bg-red-600">
-                ⚠ ALT REQ
-              </span>
-            )}
-          </div>
+<section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
+  <div className="flex items-center gap-2 mb-2">
+    <h2 className="text-lg font-bold underline">WEATHER</h2>
+    <span
+      className={`px-3 py-1 rounded-full text-lg font-bold ${
+        cat === "VFR"
+          ? "bg-green-600"
+          : cat === "MVFR"
+          ? "bg-blue-600"
+          : cat === "IFR"
+          ? "bg-red-600"
+          : "bg-fuchsia-700"
+      }`}
+    >
+      {cat}
+    </span>
+    {altReq && (
+      <span className="px-3 py-1 rounded-full text-lg font-bold bg-red-600">
+        ⚠ ALT REQ
+      </span>
+    )}
+  </div>
 
-          {crosswind && (
-            <div className="mb-2">
-              <p className="font-semibold">
-                Crosswind (Runway {airfield.activeRunway})
-              </p>
-              <span
-                className={`px-3 py-1 rounded ${
-                  crosswind.warning ? "bg-red-600" : "bg-green-600"
-                }`}
-              >
-                {crosswind.crosswind} KT {crosswind.warning && "⚠"}
-              </span>
-            </div>
-          )}
+  {crosswind && (
+    <div className="mb-2">
+      <p className="font-semibold">
+        Crosswind (Runway {airfield.activeRunway})
+      </p>
+      <span
+        className={`px-3 py-1 rounded ${
+          crosswind.warning ? "bg-red-600" : "bg-green-600"
+        }`}
+      >
+        {crosswind.crosswind} KT {crosswind.warning && "⚠"}
+      </span>
+    </div>
+  )}
 
-          <div className="grid grid-cols-2 gap-2 text-sm mb-2">
-            <div>Winds: {parsed.wind}</div>
-            <div>Vis: {parsed.vis}</div>
-            <div>Ceiling: {parsed.ceiling}</div>
-            <div>Altimeter: {parsed.altimeter}</div>
-            <div>Temp/Dew: {parsed.tempdew}</div>
-            <div>
-              FITS:{" "}
-              <span
-                className={`ml-1 font-bold ${
-                  fits.level === "NORMAL"
-                    ? "text-green-400"
-                    : fits.level === "CAUTION"
-                    ? "text-yellow-400"
-                    : fits.level === "DANGER"
-                    ? "text-orange-500"
-                    : "text-red-600"
-                }`}
-              >
-                {fits.level}{" "}
-                {Number.isFinite(fits.tempF) && `(${fits.tempF} °F Dry Bulb)`}
-              </span>
-            </div>
-          </div>
+  {/* Crosswind visual diagram */}
+  <CrosswindVisual wind={parsed.wind} runway={airfield.activeRunway} />
 
-          <div className="mt-2 flex-1 overflow-y-auto">
-            <p className="text-xs text-slate-400">Raw METAR</p>
-            <pre className="bg-slate-900 p-2 rounded text-sm whitespace-pre-wrap break-words">
-              {metar || "--"}
-            </pre>
-            <p className="text-xs text-slate-400">Raw TAF</p>
-            <pre
-              className="bg-slate-900 p-2 rounded text-sm whitespace-pre-wrap break-words"
-              dangerouslySetInnerHTML={{ __html: highlightTaf(taf) }}
-            />
-          </div>
-        </section>
+  <div className="grid grid-cols-2 gap-2 text-sm mb-2 mt-2">
+    <div>Winds: {parsed.wind}</div>
+    <div>Vis: {parsed.vis}</div>
+    <div>Ceiling: {parsed.ceiling}</div>
+    <div>Altimeter: {parsed.altimeter}</div>
+    <div>Temp/Dew: {parsed.tempdew}</div>
+    <div>
+      FITS:{" "}
+      <span
+        className={`ml-1 font-bold ${
+          fits.level === "NORMAL"
+            ? "text-green-400"
+            : fits.level === "CAUTION"
+            ? "text-yellow-400"
+            : fits.level === "DANGER"
+            ? "text-orange-500"
+            : "text-red-600"
+        }`}
+      >
+        {fits.level}{" "}
+        {Number.isFinite(fits.tempF) && `(${fits.tempF} °F Dry Bulb)`}
+      </span>
+    </div>
+  </div>
+
+  <div className="mt-2 flex-1 overflow-y-auto">
+    <p className="text-xs text-slate-400">Raw METAR</p>
+    <pre className="bg-slate-900 p-2 rounded text-sm whitespace-pre-wrap break-words">
+      {metar || "--"}
+    </pre>
+    <p className="text-xs text-slate-400">Raw TAF</p>
+    <pre
+      className="bg-slate-900 p-2 rounded text-sm whitespace-pre-wrap break-words"
+      dangerouslySetInnerHTML={{ __html: highlightTaf(taf) }}
+    />
+  </div>
+</section>
 
         {/* NOTAMs */}
         <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
