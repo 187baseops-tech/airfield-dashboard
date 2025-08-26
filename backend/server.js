@@ -62,35 +62,31 @@ async function fetchNotams(icao = "KMGM") {
       { httpsAgent }
     );
 
+    const $ = cheerio.load(html);
     const notams = [];
-    const lines = html.split("\n");
 
-    let currentNotam = null;
+    // Each NOTAM is in a <section id="notam-...">
+    $("section[id^=notam-]").each((_, el) => {
+      const header = $(el).find("h3").text().trim();
+      const body = $(el).find("p.notam").text().trim();
 
-    for (const line of lines) {
-      const text = line.trim();
-      if (!text) continue;
+      if (!header || !body) return;
 
-      // If this line looks like the start of a NOTAM
-      if (/^(NOTAM|M\d{3,4}\/\d{2}|!\w{3}|FDC)/.test(text)) {
-        // If we were already building one, push it
-        if (currentNotam) {
-          notams.push(currentNotam);
-        }
+      // ID from the section header (first NOTAM code inside h3)
+      const match = header.match(/(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/);
+      const id = match ? match[0] : header.slice(0, 20);
 
-        // Start a new NOTAM
-        const match = text.match(
-          /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
-        );
-        const id = match ? match[0] : text.slice(0, 20);
+      // Store as raw
+      notams.push({ id, text: `${header}\n${body}` });
+    });
 
-        currentNotam = { id, text };
-      }
-      // Otherwise, if we're inside a NOTAM, append details
-      else if (currentNotam) {
-        currentNotam.text += "\n" + text;
-      }
-    }
+    console.log(`✅ Found ${notams.length} NOTAMs for ${icao}`);
+    return notams;
+  } catch (err) {
+    console.error("❌ NOTAM scrape failed:", err.message);
+    return [];
+  }
+}
 
     // Push the last NOTAM if any
     if (currentNotam) notams.push(currentNotam);
