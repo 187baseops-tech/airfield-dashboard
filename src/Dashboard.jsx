@@ -16,6 +16,7 @@ import { v4 as uuidv4 } from "uuid";
 // --- Helpers ---
 function highlightTaf(rawTaf) {
   if (!rawTaf) return "--";
+
   return rawTaf
     .replace(/(BKN|OVC)(\d{3})/g, (match, layer, height) => {
       const h = parseInt(height, 10) * 100;
@@ -78,10 +79,31 @@ function computeFits(tempC) {
   if (tempF >= 90 && tempF <= 101) level = "CAUTION";
   else if (tempF >= 102 && tempF <= 114) level = "DANGER";
   else if (tempF >= 115) level = "CANCEL";
+
   return { level, tempF: Math.round(tempF) };
 }
 
-// --- SlidesCard ---
+function computeCrosswind(metarWind, activeRunway) {
+  if (!metarWind || metarWind === "--") return null;
+
+  const match = metarWind.match(/(\d{3}|VRB)(\d{2})/);
+  if (!match) return null;
+
+  let dir = match[1] === "VRB" ? null : parseInt(match[1]);
+  const spd = parseInt(match[2]);
+
+  if (!spd) return null;
+
+  const runwayHeading = activeRunway === "10" ? 100 : 280;
+  if (dir === null) return { crosswind: spd, warning: spd >= 25 };
+
+  let rel = dir - runwayHeading;
+  if (rel > 180) rel -= 360;
+  if (rel < -180) rel += 360;
+
+  const cross = Math.round(spd * Math.sin((rel * Math.PI) / 180));
+  return { crosswind: cross, warning: Math.abs(cross) >= 25 };
+}
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -94,14 +116,15 @@ function SlidesCard() {
   const trRef = useRef();
 
   const API =
-    process.env.REACT_APP_API_URL ||
-    "https://one87oss-airfield-dashboard.onrender.com";
+    (typeof process !== "undefined" && process.env?.REACT_APP_API_URL)
+      ? process.env.REACT_APP_API_URL
+      : "https://one87oss-airfield-dashboard.onrender.com";
 
   useEffect(() => {
     axios.get(`${API}/api/slides`).then((res) => setSlides(res.data));
-    axios
-      .get(`${API}/api/annotations`)
-      .then((res) => setAnnotations(res.data.slides || {}));
+    axios.get(`${API}/api/annotations`).then((res) =>
+      setAnnotations(res.data.slides || {})
+    );
   }, [API]);
 
   useEffect(() => {
@@ -148,49 +171,19 @@ function SlidesCard() {
     annots[slideKey] = annots[slideKey].filter((a) => a._id !== id);
     saveAnnotations(annots);
     setSelectedId(null);
-
-    if (trRef.current) {
-      trRef.current.nodes([]);
-      trRef.current.getLayer().batchDraw();
-    }
+    trRef.current?.nodes([]); // clear transformer
   };
 
-  // 🔑 Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === "Escape" && isFullscreen) {
-        setIsFullscreen(false);
-      }
-
-      if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
-        deleteAnnotation(selectedId);
-      }
-
-      if (selectedId && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
-        e.preventDefault();
-        const file = slides[currentSlide];
-        if (!file) return;
-        const slideKey = file;
-        const annots = { ...annotations };
-        const idx = annots[slideKey]?.findIndex((a) => a._id === selectedId);
-        if (idx > -1) {
-          const a = annots[slideKey][idx];
-          const delta = 5;
-          let dx = 0,
-            dy = 0;
-          if (e.key === "ArrowUp") dy = -delta;
-          if (e.key === "ArrowDown") dy = delta;
-          if (e.key === "ArrowLeft") dx = -delta;
-          if (e.key === "ArrowRight") dx = delta;
-
-          updateAnnotation(selectedId, { x: (a.x || a.x1 || 0) + dx, y: (a.y || a.y1 || 0) + dy });
-        }
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isFullscreen, selectedId, annotations, slides]);
+  const clearAllAnnotations = () => {
+    const file = slides[currentSlide];
+    if (!file) return;
+    const slideKey = file;
+    const annots = { ...annotations };
+    annots[slideKey] = [];
+    saveAnnotations(annots);
+    setSelectedId(null);
+    trRef.current?.nodes([]); // clear transformer
+  };
 
   useEffect(() => {
     if (trRef.current && selectedId) {
@@ -214,169 +207,257 @@ function SlidesCard() {
   const file = slides[currentSlide] || null;
   const slideKey = file || "unknown";
 
-  const renderStage = (width, height) => (
-    <Stage
-      width={width}
-      height={height}
-      className="absolute inset-0"
-      onMouseDown={(e) => {
-        if (!tool || e.target !== e.target.getStage()) return;
-        const pos = e.target.getStage().getPointerPosition();
-        if (!pos) return;
-
-        if (tool === "box") {
-          setDrawing({ type: "box", x: pos.x, y: pos.y, w: 0, h: 0 });
-        } else if (tool === "arrow") {
-          setDrawing({ type: "arrow", x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
-        } else if (tool === "x") {
-          addAnnotation({ type: "x", x: pos.x, y: pos.y });
-        } else if (tool === "text") {
-          const text = prompt("Enter note:");
-          if (text) addAnnotation({ type: "text", x: pos.x, y: pos.y, text });
-        }
-      }}
-      onMouseMove={(e) => {
-        if (!drawing) return;
-        const pos = e.target.getStage().getPointerPosition();
-        if (!pos) return;
-
-        if (drawing.type === "box") {
-          setDrawing({ ...drawing, w: pos.x - drawing.x, h: pos.y - drawing.y });
-        } else if (drawing.type === "arrow") {
-          setDrawing({ ...drawing, x2: pos.x, y2: pos.y });
-        }
-      }}
-      onMouseUp={() => {
-        if (drawing) {
-          addAnnotation(drawing);
-          setDrawing(null);
-        }
-      }}
-    >
-      <Layer>
-        {annotations[slideKey]?.map((a) => {
-          const commonProps = {
-            key: a._id,
-            id: a._id,
-            draggable: true,
-            onClick: () => setSelectedId(a._id),
-            onTap: () => setSelectedId(a._id),
-            onDragEnd: (e) => updateAnnotation(a._id, { x: e.target.x(), y: e.target.y() }),
-          };
-
-          let shape;
-          if (a.type === "box") {
-            shape = <Rect {...commonProps} x={a.x} y={a.y} width={a.w} height={a.h} stroke="red" />;
-          } else if (a.type === "x") {
-            shape = (
-              <KText {...commonProps} x={a.x} y={a.y} text="X" fontSize={32} fill="red" fontStyle="bold" />
-            );
-          } else if (a.type === "arrow") {
-            shape = (
-              <Arrow
-                {...commonProps}
-                points={[a.x1, a.y1, a.x2, a.y2]}
-                stroke="green"
-                strokeWidth={4}
-                pointerLength={12}
-                pointerWidth={12}
-              />
-            );
-          } else if (a.type === "text") {
-            shape = (
-              <KText
-                {...commonProps}
-                x={a.x}
-                y={a.y}
-                text={a.text}
-                fontSize={16}
-                fill="white"
-                background="black"
-              />
-            );
-          }
-
-          return (
-            <Group key={a._id}>
-              {shape}
-              {selectedId === a._id && (
-                <Label x={(a.x || a.x1 || 0) + 10} y={(a.y || a.y1 || 0) - 20} onClick={() => deleteAnnotation(a._id)}>
-                  <Tag fill="red" pointerDirection="up" />
-                  <KText text="❌" fontSize={16} fill="white" padding={2} />
-                </Label>
-              )}
-            </Group>
-          );
-        })}
-
-        {drawing?.type === "box" && (
-          <Rect x={drawing.x} y={drawing.y} width={drawing.w} height={drawing.h} stroke="red" dash={[4, 4]} />
-        )}
-        {drawing?.type === "arrow" && (
-          <Arrow
-            points={[drawing.x1, drawing.y1, drawing.x2, drawing.y2]}
-            stroke="green"
-            strokeWidth={4}
-            pointerLength={12}
-            pointerWidth={12}
-            dash={[4, 4]}
-          />
-        )}
-
-        <Transformer ref={trRef} rotateEnabled={true} resizeEnabled={true} />
-      </Layer>
-    </Stage>
-  );
+  const SlideContainer = ({ children }) =>
+    isFullscreen ? (
+      <div className="fixed inset-0 z-50 bg-black flex flex-col">
+        <div className="flex justify-between p-2 bg-slate-900 text-white">
+          <button
+            onClick={() => setIsFullscreen(false)}
+            className="px-3 py-1 bg-red-600 rounded"
+          >
+            ✖ Close
+          </button>
+          <button
+            onClick={clearAllAnnotations}
+            className="px-3 py-1 bg-yellow-600 rounded"
+          >
+            🧹 Clear All
+          </button>
+        </div>
+        <div className="flex-1 flex items-center justify-center overflow-auto">
+          {children}
+        </div>
+      </div>
+    ) : (
+      <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[400px]">
+        {children}
+      </div>
+    );
 
   return (
-    <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2 relative">
+    <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
       <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
 
       {file ? (
-        <>
-          {!isFullscreen ? (
-            <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden h-[400px]">
-              <img src={`${API}/slides/${file}`} alt="Slide" className="object-contain max-h-full max-w-full" />
-              {renderStage(800, 400)}
-            </div>
-          ) : (
-            <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center">
-              <button
-                className="absolute top-4 right-4 px-3 py-1 bg-red-600 rounded text-white z-50"
-                onClick={() => setIsFullscreen(false)}
-              >
-                ✖ Close
-              </button>
-              <img src={`${API}/slides/${file}`} alt="Slide" className="object-contain max-h-full max-w-full" />
-              {renderStage(window.innerWidth, window.innerHeight)}
-            </div>
-          )}
-        </>
+        <SlideContainer>
+          <img
+            src={`${API}/slides/${file}`}
+            alt="Slide"
+            className="object-contain max-h-full max-w-full"
+          />
+          <Stage
+            width={isFullscreen ? window.innerWidth : 800}
+            height={isFullscreen ? window.innerHeight - 50 : 400}
+            className="absolute inset-0 w-full h-full"
+            onMouseDown={(e) => {
+              if (!tool || e.target !== e.target.getStage()) return;
+              const pos = e.target.getStage().getPointerPosition();
+              if (!pos) return;
+
+              if (tool === "box") {
+                setDrawing({ type: "box", x: pos.x, y: pos.y, w: 0, h: 0 });
+              } else if (tool === "arrow") {
+                setDrawing({ type: "arrow", x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y });
+              } else if (tool === "x") {
+                addAnnotation({ type: "x", x: pos.x, y: pos.y });
+              } else if (tool === "text") {
+                const text = prompt("Enter note:");
+                if (text) addAnnotation({ type: "text", x: pos.x, y: pos.y, text });
+              }
+            }}
+            onMouseMove={(e) => {
+              if (!drawing) return;
+              const pos = e.target.getStage().getPointerPosition();
+              if (!pos) return;
+
+              if (drawing.type === "box") {
+                setDrawing({
+                  ...drawing,
+                  w: pos.x - drawing.x,
+                  h: pos.y - drawing.y,
+                });
+              } else if (drawing.type === "arrow") {
+                setDrawing({ ...drawing, x2: pos.x, y2: pos.y });
+              }
+            }}
+            onMouseUp={() => {
+              if (drawing) {
+                addAnnotation(drawing);
+                setDrawing(null);
+              }
+            }}
+          >
+            <Layer>
+              {annotations[slideKey]?.map((a) => {
+                const commonProps = {
+                  key: a._id,
+                  id: a._id,
+                  draggable: true,
+                  onClick: () => setSelectedId(a._id),
+                  onTap: () => setSelectedId(a._id),
+                  onDragEnd: (e) =>
+                    updateAnnotation(a._id, {
+                      x: e.target.x(),
+                      y: e.target.y(),
+                    }),
+                };
+
+                let shape;
+                if (a.type === "box") {
+                  shape = (
+                    <Rect
+                      {...commonProps}
+                      x={a.x}
+                      y={a.y}
+                      width={a.w}
+                      height={a.h}
+                      stroke="red"
+                    />
+                  );
+                } else if (a.type === "x") {
+                  shape = (
+                    <KText
+                      {...commonProps}
+                      x={a.x}
+                      y={a.y}
+                      text="X"
+                      fontSize={32}
+                      fill="red"
+                      fontStyle="bold"
+                    />
+                  );
+                } else if (a.type === "arrow") {
+                  shape = (
+                    <Arrow
+                      {...commonProps}
+                      points={[a.x1, a.y1, a.x2, a.y2]}
+                      stroke="green"
+                      strokeWidth={4}
+                      pointerLength={10}
+                      pointerWidth={10}
+                    />
+                  );
+                } else if (a.type === "text") {
+                  shape = (
+                    <KText
+                      {...commonProps}
+                      x={a.x}
+                      y={a.y}
+                      text={a.text}
+                      fontSize={16}
+                      fill="white"
+                      background="black"
+                    />
+                  );
+                }
+
+                return (
+                  <Group key={a._id}>
+                    {shape}
+                    {selectedId === a._id && (
+                      <Label
+                        x={(a.x || a.x1 || 0) + 10}
+                        y={(a.y || a.y1 || 0) - 20}
+                        onClick={() => deleteAnnotation(a._id)}
+                      >
+                        <Tag fill="red" pointerDirection="up" />
+                        <KText text="❌" fontSize={16} fill="white" padding={2} />
+                      </Label>
+                    )}
+                  </Group>
+                );
+              })}
+
+              {/* Temporary drawing preview */}
+              {drawing?.type === "box" && (
+                <Rect
+                  x={drawing.x}
+                  y={drawing.y}
+                  width={drawing.w}
+                  height={drawing.h}
+                  stroke="red"
+                  dash={[4, 4]}
+                />
+              )}
+              {drawing?.type === "arrow" && (
+                <Arrow
+                  points={[drawing.x1, drawing.y1, drawing.x2, drawing.y2]}
+                  stroke="green"
+                  strokeWidth={4}
+                  pointerLength={10}
+                  pointerWidth={10}
+                  dash={[4, 4]}
+                />
+              )}
+
+              <Transformer ref={trRef} rotateEnabled={true} resizeEnabled={true} />
+            </Layer>
+          </Stage>
+        </SlideContainer>
       ) : (
         <p className="text-slate-400">No slide selected.</p>
       )}
 
       {/* Controls */}
       <div className="flex flex-wrap justify-center gap-2 mt-3">
-        <button onClick={() => setCurrentSlide((s) => (s - 1 + slides.length) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">⏮ Prev</button>
-        <button onClick={() => setCurrentSlide((s) => (s + 1) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">⏭ Next</button>
-        <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-slate-700 rounded">{isPlaying ? "⏸ Pause" : "▶ Play"}</button>
-        <button onClick={() => setIsFullscreen(true)} className="px-3 py-1 bg-blue-600 rounded">⛶ Enlarge</button>
+        <button
+          onClick={() =>
+            setCurrentSlide((s) => (s - 1 + slides.length) % slides.length)
+          }
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
+          ⏮ Prev
+        </button>
+        <button
+          onClick={() => setCurrentSlide((s) => (s + 1) % slides.length)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
+          ⏭ Next
+        </button>
+        <button
+          onClick={() => setIsPlaying(!isPlaying)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
+          {isPlaying ? "⏸ Pause" : "▶ Play"}
+        </button>
+        <button
+          onClick={() => setIsFullscreen(true)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
+          ⛶ Enlarge
+        </button>
       </div>
 
       {/* Annotation Tools */}
       <div className="flex flex-wrap justify-center gap-2 mt-2">
-        <button onClick={() => setTool("x")} className={`px-3 py-1 rounded ${tool === "x" ? "bg-blue-600" : "bg-slate-700"}`}>❌ X</button>
-        <button onClick={() => setTool("box")} className={`px-3 py-1 rounded ${tool === "box" ? "bg-blue-600" : "bg-slate-700"}`}>⬛ Box</button>
-        <button onClick={() => setTool("arrow")} className={`px-3 py-1 rounded ${tool === "arrow" ? "bg-blue-600" : "bg-slate-700"}`}>➡️ Arrow</button>
-        <button onClick={() => setTool("text")} className={`px-3 py-1 rounded ${tool === "text" ? "bg-blue-600" : "bg-slate-700"}`}>📝 Text</button>
+        <button
+          onClick={() => setTool("x")}
+          className={`px-3 py-1 rounded ${tool === "x" ? "bg-blue-600" : "bg-slate-700"}`}
+        >
+          ❌ X
+        </button>
+        <button
+          onClick={() => setTool("box")}
+          className={`px-3 py-1 rounded ${tool === "box" ? "bg-blue-600" : "bg-slate-700"}`}
+        >
+          ⬛ Box
+        </button>
+        <button
+          onClick={() => setTool("arrow")}
+          className={`px-3 py-1 rounded ${tool === "arrow" ? "bg-blue-600" : "bg-slate-700"}`}
+        >
+          ➡️ Arrow
+        </button>
+        <button
+          onClick={() => setTool("text")}
+          className={`px-3 py-1 rounded ${tool === "text" ? "bg-blue-600" : "bg-slate-700"}`}
+        >
+          📝 Text
+        </button>
       </div>
     </section>
   );
 }
-
-
-
 // --- Main Dashboard ---
 export default function Dashboard() {
   const ICAO = "KMGM";
@@ -390,9 +471,10 @@ export default function Dashboard() {
   const [altICAO, setAltICAO] = useState("");
   const [notams, setNotams] = useState([]);
   const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [activeRunway, setActiveRunway] = useState("10");
+  const [crosswind, setCrosswind] = useState(null);
 
   // --- Airfield Toggles ---
-  const [activeRunway, setActiveRunway] = useState("10");
   const [rsc, setRsc] = useState("DRY");
   const [rscNotes, setRscNotes] = useState("");
   const [barriers, setBarriers] = useState({ east: "DOWN", west: "DOWN" });
@@ -408,10 +490,15 @@ export default function Dashboard() {
     ShelbyRange: "LOW",
   });
 
-  const API =
-    process.env.REACT_APP_API_URL || "https://one87oss-airfield-dashboard.onrender.com";
+  // --- Burn-in jitter ---
+  const [jitter, setJitter] = useState({ x: 0, y: 0 });
 
-  // --- Fetch METAR/TAF/NOTAMs ---
+  const API =
+    (typeof process !== "undefined" && process.env?.REACT_APP_API_URL)
+      ? process.env.REACT_APP_API_URL
+      : "https://one87oss-airfield-dashboard.onrender.com";
+
+  // --- Fetch Data ---
   async function fetchData() {
     try {
       const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
@@ -426,61 +513,87 @@ export default function Dashboard() {
     }
   }
 
-  // --- Fetch NAVAIDs & BASH ---
   async function fetchNavaids() {
     try {
       const res = await axios.get(`${API}/api/navaids`);
       setNavaids(res.data);
-    } catch (err) {
-      console.error("Failed to fetch NAVAIDs:", err.message);
-    }
+    } catch {}
   }
 
   async function fetchBash() {
     try {
       const res = await axios.get(`${API}/api/bash`);
       setBash(res.data);
-    } catch (err) {
-      console.error("Failed to fetch BASH:", err.message);
-    }
+    } catch {}
   }
 
+  // --- Auto refresh + jitter ---
   useEffect(() => {
     fetchData();
     fetchNavaids();
     fetchBash();
+
     const timer = setInterval(() => {
       fetchData();
       fetchNavaids();
       fetchBash();
-    }, 300000);
-    return () => clearInterval(timer);
+    }, 300000); // every 5 min
+
+    const pageReload = setInterval(() => {
+      window.location.reload();
+    }, 300000); // force full reload every 5 min
+
+    const jitterTimer = setInterval(() => {
+      setJitter({
+        x: Math.floor(Math.random() * 3) - 1,
+        y: Math.floor(Math.random() * 3) - 1,
+      });
+    }, 60000); // shift every 1 min
+
+    return () => {
+      clearInterval(timer);
+      clearInterval(pageReload);
+      clearInterval(jitterTimer);
+    };
   }, []);
 
   // --- Process METAR/TAF ---
   useEffect(() => {
     const p = parseMetar(metar);
     setParsed(p);
+
     const visMiles = parseVisibility(p.vis);
     const ceilFt =
       p.ceiling && /^(BKN|OVC)\d{3}/.test(p.ceiling)
         ? parseInt(p.ceiling.match(/\d{3}/)[0]) * 100
         : 99999;
     setCat(flightCat(ceilFt, visMiles));
+
     const tempMatch = p.tempdew?.match(/(M?\d{2})\/(M?\d{2})/);
     if (tempMatch) {
       const tC = parseInt(tempMatch[1].replace("M", "-"));
       setFits(computeFits(tC));
     }
+
     let altNeeded = false;
-    if (p.ceiling && /^(BKN|OVC)\d{3}/.test(p.ceiling) && ceilFt <= 1500 && visMiles < 3) {
+    if (
+      p.ceiling &&
+      /^(BKN|OVC)\d{3}/.test(p.ceiling) &&
+      ceilFt <= 1500 &&
+      visMiles < 3
+    ) {
       altNeeded = true;
     }
     setAltReq(altNeeded);
-  }, [metar, taf]);
+
+    setCrosswind(computeCrosswind(p.wind, activeRunway));
+  }, [metar, taf, activeRunway]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4">
+    <div
+      className="min-h-screen bg-slate-950 text-slate-100 p-4"
+      style={{ transform: `translate(${jitter.x}px, ${jitter.y}px)` }}
+    >
       {/* Header */}
       <header className="flex flex-col items-center mb-4 text-center">
         <h1 className="text-xl font-bold">
@@ -490,7 +603,9 @@ export default function Dashboard() {
         <div className="text-sm mt-2">
           <p>{new Date().toLocaleString()}</p>
           <p>Zulu: {new Date().toUTCString()}</p>
-          <p className="text-slate-400">Last Updated: {lastUpdate.toLocaleString()}</p>
+          <p className="text-slate-400">
+            Last Updated: {lastUpdate.toLocaleString()}
+          </p>
           <button
             onClick={() => {
               fetchData();
@@ -509,16 +624,20 @@ export default function Dashboard() {
         {/* Airfield Status */}
         <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
           <h2 className="text-lg font-bold underline mb-2">Airfield Status</h2>
+
           {/* Active Runway */}
           <div className="mb-2">
             <p className="font-semibold">Active Runway</p>
             <button
               className="px-3 py-1 rounded bg-green-600"
-              onClick={() => setActiveRunway(activeRunway === "10" ? "28" : "10")}
+              onClick={() =>
+                setActiveRunway(activeRunway === "10" ? "28" : "10")
+              }
             >
               {activeRunway}
             </button>
           </div>
+
           {/* RSC */}
           <div className="mb-2">
             <p className="font-semibold">RSC</p>
@@ -532,7 +651,13 @@ export default function Dashboard() {
                     : "bg-slate-700"
                 }`}
                 onClick={() =>
-                  setRsc(rsc === "DRY" ? "WET" : rsc === "WET" ? "N/A" : "DRY")
+                  setRsc(
+                    rsc === "DRY"
+                      ? "WET"
+                      : rsc === "WET"
+                      ? "N/A"
+                      : "DRY"
+                  )
                 }
               >
                 {rsc}
@@ -546,6 +671,7 @@ export default function Dashboard() {
               />
             </div>
           </div>
+
           {/* Barriers */}
           <div className="mb-2">
             <p className="font-semibold">Barriers</p>
@@ -554,7 +680,9 @@ export default function Dashboard() {
                 <button
                   key={side}
                   className={`px-2 py-1 rounded ${
-                    barriers[side] === "UNSERVICEABLE" ? "bg-red-600" : "bg-green-600"
+                    barriers[side] === "UNSERVICEABLE"
+                      ? "bg-red-600"
+                      : "bg-green-600"
                   }`}
                   onClick={() =>
                     setBarriers((prev) => ({
@@ -573,6 +701,7 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
+
           {/* NAVAIDs */}
           <div className="mb-2">
             <p className="font-semibold">NAVAIDs</p>
@@ -605,6 +734,7 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
+
           {/* ARFF */}
           <div className="mb-2">
             <p className="font-semibold">ARFF</p>
@@ -617,7 +747,13 @@ export default function Dashboard() {
                   : "bg-red-600"
               }`}
               onClick={() =>
-                setArff(arff === "GREEN" ? "YELLOW" : arff === "YELLOW" ? "RED" : "GREEN")
+                setArff(
+                  arff === "GREEN"
+                    ? "YELLOW"
+                    : arff === "YELLOW"
+                    ? "RED"
+                    : "GREEN"
+                )
               }
             >
               ARFF {arff}
@@ -648,15 +784,20 @@ export default function Dashboard() {
               </span>
             )}
           </div>
-          {altReq && (
-            <input
-              type="text"
-              placeholder="Enter Alternate ICAO"
-              value={altICAO}
-              onChange={(e) => setAltICAO(e.target.value.toUpperCase())}
-              className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-600 text-sm font-bold text-red-500 mb-2"
-            />
+
+          {crosswind && (
+            <div className="mb-2">
+              <p className="font-semibold">Crosswind (Runway {activeRunway})</p>
+              <span
+                className={`px-3 py-1 rounded ${
+                  crosswind.warning ? "bg-red-600" : "bg-green-600"
+                }`}
+              >
+                {crosswind.crosswind} KT {crosswind.warning && "⚠"}
+              </span>
+            </div>
           )}
+
           <div className="grid grid-cols-2 gap-2 text-sm mb-2">
             <div>Winds: {parsed.wind}</div>
             <div>Vis: {parsed.vis}</div>
@@ -681,6 +822,7 @@ export default function Dashboard() {
               </span>
             </div>
           </div>
+
           <div className="mt-2 flex-1 overflow-y-auto">
             <p className="text-xs text-slate-400">Raw METAR</p>
             <pre className="bg-slate-900 p-2 rounded text-sm whitespace-pre-wrap break-words">
