@@ -76,8 +76,6 @@ function computeFits(tempC, dewC) {
   return { level, wbgt: Math.round(wbgt) };
 }
 // --- SlidesCard ---
-import { useState, useEffect, useRef } from "react";
-import axios from "axios";
 import {
   Stage,
   Layer,
