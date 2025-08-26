@@ -5,8 +5,10 @@ import cors from "cors";
 import https from "https";
 import fs from "fs";
 import path from "path";
-import { v4 as uuidv4 } from "uuid";
-import solace from "solclientjs";
+import solclientjs from "solclientjs";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -50,8 +52,76 @@ function saveState() {
 const SLIDES_DIR = path.join(process.cwd(), "../data/slides");
 const ANNOT_FILE = path.join(SLIDES_DIR, "annotations.json");
 
-// ---- OurAirports NOTAM Scraper ----
-async function fetchNotams(icao = "KMGM") {
+// ---- NOTAM Caches ----
+let swimNotams = [];
+let fallbackNotams = [];
+
+// ---- SWIM (Solace) Setup ----
+console.log("🌐 Initializing SWIM Solace listener...");
+const factoryProps = new solclientjs.SolclientFactoryProperties();
+factoryProps.profile = solclientjs.SolclientFactoryProfiles.version10;
+solclientjs.SolclientFactory.init(factoryProps);
+
+const session = solclientjs.SolclientFactory.createSession({
+  url: process.env.SOLACE_HOST,
+  vpnName: process.env.SOLACE_VPN,
+  userName: process.env.SOLACE_USERNAME,
+  password: process.env.SOLACE_PASSWORD,
+  reconnectRetries: 5,
+});
+
+session.on(solclientjs.SessionEventCode.UP_NOTICE, () => {
+  console.log("✅ Connected to FAA SWIM via Solace");
+
+  const flowProps = new solclientjs.FlowProperties();
+  flowProps.endpoint = { type: solclientjs.EndpointType.QUEUE, name: process.env.SWIM_QUEUE };
+  flowProps.bind = true;
+
+  const messageConsumer = session.createMessageConsumer(flowProps);
+  messageConsumer.on(solclientjs.MessageConsumerEventName.MESSAGE, (msg) => {
+    try {
+      const text = msg.getSdtContainer().getXml();
+      if (!text) return;
+
+      // Parse NOTAM messages
+      const match = text.match(/<notamText>([\s\S]*?)<\/notamText>/i);
+      if (match) {
+        const rawText = match[1].trim();
+
+        // Filter KMGM only
+        if (/KMGM/i.test(rawText)) {
+          const idMatch = rawText.match(/!KMGM\s+(\d{2}\/\d{3,4})/);
+          const id = idMatch ? idMatch[1] : `KMGM-${Date.now()}`;
+
+          const notam = { id, text: rawText };
+          swimNotams = [notam, ...swimNotams].slice(0, 50); // keep last 50
+          console.log(`✅ SWIM NOTAM added for KMGM: ${id}`);
+        }
+      }
+    } catch (err) {
+      console.error("❌ Failed to parse SWIM message:", err.message);
+    }
+  });
+
+  messageConsumer.on(solclientjs.MessageConsumerEventName.DOWN, () => {
+    console.warn("⚠ SWIM consumer down");
+  });
+
+  messageConsumer.connect();
+  console.log(`✅ Bound to SWIM queue: ${process.env.SWIM_QUEUE}`);
+});
+
+session.on(solclientjs.SessionEventCode.CONNECT_FAILED_ERROR, () =>
+  console.error("❌ SWIM connection failed")
+);
+session.on(solclientjs.SessionEventCode.DISCONNECTED, () =>
+  console.warn("⚠ SWIM disconnected")
+);
+
+session.connect();
+
+// ---- OurAirports Fallback ----
+async function fetchFallbackNotams(icao = "KMGM") {
   try {
     console.log(`🌐 Scraping OurAirports for ${icao}...`);
     const httpsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -68,107 +138,67 @@ async function fetchNotams(icao = "KMGM") {
       const body = $(el).find("p.notam").text().trim();
       if (!header || !body) return;
 
-      const idMatch = header.match(
+      const match = header.match(
         /(M?\d{3,4}\/\d{2}|!\w{3}\s+\d{2}\/\d{3,4}|FDC\s*\d{1,4}\/\d{2})/
       );
-      const id = idMatch ? idMatch[0] : header.slice(0, 20);
+      const id = match ? match[0] : header.slice(0, 20);
 
-      const text = `${id}\n${body}`;
-      notams.push({ id, text });
+      const lines = body.split("\n").map((l) => l.trim()).filter(Boolean);
+      notams.push({ id, text: `${id}\n${lines.join("\n")}` });
     });
 
+    fallbackNotams = notams;
     console.log(`✅ Retrieved ${notams.length} NOTAMs from OurAirports`);
-    return notams;
   } catch (err) {
-    console.error("❌ OurAirports scrape failed:", err.message);
-    return [];
+    console.error("❌ OurAirports NOTAM fetch failed:", err.message);
+    fallbackNotams = [];
   }
 }
 
-// ---- FAA SWIM via Solace ----
-let latestNotams = [];
-
-function initSwim() {
-  console.log("🌐 Initializing SWIM Solace listener...");
-
-  solace.SolclientFactory.init({
-    profile: solace.SolclientFactoryProfiles.version10,
-  });
-
-  const factoryProps = new solace.SolclientFactoryProperties();
-  const sessionProps = {
-    url: process.env.SOLACE_HOST,
-    vpnName: process.env.SOLACE_VPN,
-    userName: process.env.SOLACE_USERNAME,
-    password: process.env.SOLACE_PASSWORD,
-  };
-
-  const session = solace.SolclientFactory.createSession(sessionProps);
-
-  session.on(solace.SessionEventCode.UP_NOTICE, () => {
-    console.log("✅ Connected to FAA SWIM via Solace");
-    const consumer = session.createMessageConsumer({
-      queueDescriptor: { name: process.env.SWIM_QUEUE, type: solace.QueueType.QUEUE },
-      acknowledgeMode: solace.MessageConsumerAcknowledgeMode.AUTO,
-    });
-
-    consumer.on(solace.MessageConsumerEventName.UP, () => {
-      console.log(`✅ Bound to SWIM queue: ${process.env.SWIM_QUEUE}`);
-    });
-
-    consumer.on(solace.MessageConsumerEventName.MESSAGE, (message) => {
-      try {
-        let text = null;
-        if (message.getBinaryAttachment()) {
-          text = message.getBinaryAttachment().toString();
-        } else if (message.getXmlContent()) {
-          text = message.getXmlContent();
-        }
-
-        console.log("🔎 SWIM raw preview:", (text || "").slice(0, 200));
-
-        if (text && /KMGM/.test(text)) {
-          const notamId = uuidv4();
-          latestNotams.unshift({ id: notamId, text });
-          if (latestNotams.length > 100) latestNotams.pop();
-          console.log(`📥 KMGM NOTAM from SWIM: ${notamId}`);
-        }
-      } catch (err) {
-        console.error("❌ Failed to parse SWIM message:", err.message);
-      }
-    });
-
-    consumer.connect();
-  });
-
-  session.on(solace.SessionEventCode.CONNECT_FAILED_ERROR, (e) => {
-    console.error("❌ SWIM Solace connect failed:", e.infoStr);
-  });
-
-  session.connect();
-}
+// refresh fallback every 15 min
+setInterval(() => fetchFallbackNotams("KMGM"), 15 * 60 * 1000);
+fetchFallbackNotams("KMGM");
 
 // ---- Routes ----
 app.get("/", (req, res) => res.send("✅ Airfield Dashboard Backend running"));
 
 // NOTAMs
-app.get("/api/notams", async (req, res) => {
-  let out = latestNotams;
-  if (!out || out.length === 0) {
-    console.log("⚠️ No SWIM NOTAMs, falling back to OurAirports scrape...");
-    out = await fetchNotams("KMGM");
+app.get("/api/notams", (req, res) => {
+  const icao = req.query.icao || "KMGM";
+  if (icao !== "KMGM") return res.json({ notams: [] });
+
+  // Prefer SWIM, fallback to OurAirports
+  if (swimNotams.length > 0) {
+    res.json({ notams: swimNotams });
+  } else {
+    res.json({ notams: fallbackNotams });
   }
-  res.json({ notams: out });
 });
 
-// Weather stubs (you probably already hooked to NOAA)
-app.get("/api/metar", (req, res) => {
+// METAR
+app.get("/api/metar", async (req, res) => {
   const icao = req.query.icao || "KMGM";
-  res.json({ raw: `${icao} 261755Z AUTO 00000KT 10SM CLR 30/18 A2992 RMK AO2` });
+  try {
+    const { data } = await axios.get(
+      `https://aviationweather.gov/api/data/metar?ids=${icao}&format=raw`
+    );
+    res.json({ raw: data[0]?.rawOb || `${icao} AUTO --` });
+  } catch {
+    res.json({ raw: `${icao} AUTO --` });
+  }
 });
-app.get("/api/taf", (req, res) => {
+
+// TAF
+app.get("/api/taf", async (req, res) => {
   const icao = req.query.icao || "KMGM";
-  res.json({ raw: `${icao} 261730Z 2618/2718 18005KT P6SM SCT050 BKN200` });
+  try {
+    const { data } = await axios.get(
+      `https://aviationweather.gov/api/data/taf?ids=${icao}&format=raw`
+    );
+    res.json({ raw: data[0]?.rawTAF || `${icao} NIL` });
+  } catch {
+    res.json({ raw: `${icao} NIL` });
+  }
 });
 
 // State persistence
@@ -185,6 +215,7 @@ app.get("/api/bash", (req, res) => res.json(savedState.bash));
 
 // Slides + Annotations
 app.use("/slides", express.static(SLIDES_DIR));
+
 app.get("/api/slides", (req, res) => {
   try {
     if (!fs.existsSync(SLIDES_DIR)) return res.json([]);
@@ -196,6 +227,7 @@ app.get("/api/slides", (req, res) => {
     res.json([]);
   }
 });
+
 app.get("/api/annotations", (req, res) => {
   if (fs.existsSync(ANNOT_FILE)) {
     try {
@@ -208,6 +240,7 @@ app.get("/api/annotations", (req, res) => {
     res.json({ slides: {} });
   }
 });
+
 app.post("/api/annotations", (req, res) => {
   try {
     fs.writeFileSync(ANNOT_FILE, JSON.stringify(req.body, null, 2));
@@ -221,5 +254,4 @@ app.post("/api/annotations", (req, res) => {
 // ---- Start ----
 app.listen(PORT, () => {
   console.log(`🚀 Backend listening on port ${PORT}`);
-  initSwim();
 });
