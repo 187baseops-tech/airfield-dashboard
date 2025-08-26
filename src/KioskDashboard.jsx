@@ -1,13 +1,21 @@
 import { useState, useEffect, useRef } from "react";
 import axios from "axios";
-import {
-  Stage,
-  Layer,
-  Rect,
-  Arrow,
-  Text as KText,
+import { 
+  Stage, 
+  Layer, 
+  Rect, 
+  Arrow, 
+  Text as KText, 
+  Group, 
+  Label, 
+  Tag, 
   Image as KonvaImage,
+  Transformer
 } from "react-konva";
+import { v4 as uuidv4 } from "uuid";
+
+// --- Disable actions in kiosk mode ---
+const noop = () => {};
 
 // --- Helpers ---
 function highlightTaf(rawTaf) {
@@ -78,8 +86,7 @@ function computeFits(tempC) {
 
   return { level, tempF: Math.round(tempF) };
 }
-
-// --- SlidesCard (read-only) ---
+// --- SlidesCard (Kiosk Read-Only) ---
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -87,13 +94,13 @@ function SlidesCard() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [imageObj, setImageObj] = useState(null);
-  const trRef = useRef();
 
   const API =
     (typeof process !== "undefined" && process.env?.REACT_APP_API_URL)
       ? process.env.REACT_APP_API_URL
       : "https://airfield-dashboard.onrender.com";
 
+  // Load slides + annotations
   useEffect(() => {
     axios.get(`${API}/api/slides`).then((res) => setSlides(res.data));
     axios.get(`${API}/api/annotations`).then((res) =>
@@ -101,6 +108,7 @@ function SlidesCard() {
     );
   }, [API]);
 
+  // Load image
   useEffect(() => {
     if (!slides[currentSlide]) return;
     const img = new window.Image();
@@ -108,6 +116,7 @@ function SlidesCard() {
     img.onload = () => setImageObj(img);
   }, [slides, currentSlide]);
 
+  // Auto-play
   useEffect(() => {
     if (isPlaying && slides.length > 0) {
       const interval = setInterval(
@@ -160,12 +169,14 @@ function SlidesCard() {
           <Stage
             width={isFullscreen ? window.innerWidth : 800}
             height={
-              isFullscreen ? window.innerHeight - 50 : (imageObj.height * 800) / imageObj.width
+              isFullscreen
+                ? window.innerHeight - 50
+                : (imageObj.height * 800) / imageObj.width
             }
             className="absolute inset-0 w-full h-full"
           >
             <Layer>
-              {/* Background slide image */}
+              {/* Background */}
               <KonvaImage
                 image={imageObj}
                 x={0}
@@ -175,12 +186,30 @@ function SlidesCard() {
                 listening={false}
               />
 
-              {/* Existing annotations only */}
+              {/* Existing annotations (read-only) */}
               {annotations[slideKey]?.map((a) => {
                 if (a.type === "box") {
-                  return <Rect key={a._id} x={a.x} y={a.y} width={a.w} height={a.h} stroke="red" />;
+                  return (
+                    <Rect
+                      key={a._id}
+                      x={a.x}
+                      y={a.y}
+                      width={a.w}
+                      height={a.h}
+                      stroke="red"
+                    />
+                  );
                 } else if (a.type === "x") {
-                  return <KText key={a._id} x={a.x} y={a.y} text="X" fontSize={32} fill="red" />;
+                  return (
+                    <KText
+                      key={a._id}
+                      x={a.x}
+                      y={a.y}
+                      text="X"
+                      fontSize={32}
+                      fill="red"
+                    />
+                  );
                 } else if (a.type === "arrow") {
                   return (
                     <Arrow
@@ -213,29 +242,42 @@ function SlidesCard() {
         <p className="text-slate-400">No slide selected.</p>
       )}
 
-      {/* Controls */}
+      {/* Controls: Prev/Next/Play/Enlarge only */}
       <div className="flex flex-wrap justify-center gap-2 mt-3">
-        <button onClick={() => setCurrentSlide((s) => (s - 1 + slides.length) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">
+        <button
+          onClick={() =>
+            setCurrentSlide((s) => (s - 1 + slides.length) % slides.length)
+          }
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
           ⏮ Prev
         </button>
-        <button onClick={() => setCurrentSlide((s) => (s + 1) % slides.length)} className="px-3 py-1 bg-slate-700 rounded">
+        <button
+          onClick={() => setCurrentSlide((s) => (s + 1) % slides.length)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
           ⏭ Next
         </button>
-        <button onClick={() => setIsPlaying(!isPlaying)} className="px-3 py-1 bg-slate-700 rounded">
+        <button
+          onClick={() => setIsPlaying(!isPlaying)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
           {isPlaying ? "⏸ Pause" : "▶ Play"}
         </button>
-        <button onClick={() => setIsFullscreen(true)} className="px-3 py-1 bg-slate-700 rounded">
+        <button
+          onClick={() => setIsFullscreen(true)}
+          className="px-3 py-1 bg-slate-700 rounded"
+        >
           ⛶ Enlarge
         </button>
       </div>
     </section>
   );
 }
-
-// --- Main Kiosk Dashboard ---
 export default function KioskDashboard() {
   const ICAO = "KMGM";
 
+  // Weather
   const [metar, setMetar] = useState("");
   const [taf, setTaf] = useState("");
   const [parsed, setParsed] = useState({});
@@ -245,11 +287,36 @@ export default function KioskDashboard() {
   const [notams, setNotams] = useState([]);
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
+  // Persisted state (read only)
+  const [airfield, setAirfield] = useState({
+    activeRunway: "10",
+    rsc: "DRY",
+    rscNotes: "",
+    barriers: { east: "DOWN", west: "DOWN" },
+    arff: "GREEN",
+  });
+  const [navaids, setNavaids] = useState({
+    mgm: "IN",
+    mxf: "IN",
+    ils10: "IN",
+    ils28: "IN",
+  });
+  const [bash, setBash] = useState({
+    KMGM: "LOW",
+    KMXF: "LOW",
+    PHCR_MOA: "LOW",
+    BHM_MOA: "LOW",
+    VR060: "LOW",
+    VR1056: "LOW",
+    ShelbyRange: "LOW",
+  });
+
   const API =
     (typeof process !== "undefined" && process.env?.REACT_APP_API_URL)
       ? process.env.REACT_APP_API_URL
       : "https://airfield-dashboard.onrender.com";
 
+  // Fetch functions
   async function fetchMetarTaf() {
     try {
       const m = await axios.get(`${API}/api/metar?icao=${ICAO}`);
@@ -271,19 +338,36 @@ export default function KioskDashboard() {
     }
   }
 
+  async function fetchState() {
+    try {
+      const res = await axios.get(`${API}/api/state`);
+      const s = res.data;
+      if (s.airfield) setAirfield(s.airfield);
+      if (s.navaids) setNavaids(s.navaids);
+      if (s.bash) setBash(s.bash);
+    } catch (err) {
+      console.error("❌ Failed to fetch state:", err.message);
+    }
+  }
+
+  // Auto refresh
   useEffect(() => {
     fetchMetarTaf();
     fetchNotams();
+    fetchState();
 
     const wxTimer = setInterval(fetchMetarTaf, 5 * 60 * 1000);
     const notamTimer = setInterval(fetchNotams, 15 * 60 * 1000);
+    const stateTimer = setInterval(fetchState, 5 * 60 * 1000);
 
     return () => {
       clearInterval(wxTimer);
       clearInterval(notamTimer);
+      clearInterval(stateTimer);
     };
   }, []);
 
+  // Process METAR/TAF
   useEffect(() => {
     const p = parseMetar(metar);
     setParsed(p);
@@ -311,35 +395,145 @@ export default function KioskDashboard() {
       altNeeded = true;
     }
     setAltReq(altNeeded);
-  }, [metar, taf]);
+  }, [metar, taf, airfield.activeRunway]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4">
+      {/* Header */}
       <header className="flex flex-col items-center mb-4 text-center relative">
         <img
           src="/oss-patch.png"
           alt="187th OSS Patch"
           className="absolute top-0 left-0 w-20 h-20 md:w-28 md:h-28 object-contain m-2"
         />
+
         <h1 className="text-xl font-bold">
           187th Operations Support Squadron — {ICAO} Dannelly Field
         </h1>
-        <p className="text-lg font-semibold">Airfield Dashboard — Kiosk Mode</p>
+        <p className="text-lg font-semibold">Airfield Dashboard (Kiosk Mode)</p>
+
         <div className="text-sm mt-2">
           <p className="text-slate-400">
             Last Updated:{" "}
-            {lastUpdate.toLocaleTimeString([], {
-              hour12: false,
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            {lastUpdate
+              .toLocaleTimeString([], {
+                hour12: false,
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
           </p>
         </div>
       </header>
 
+      {/* First Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
-        {/* Weather */}
+        {/* Airfield Status (all buttons visible, disabled actions) */}
         <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
+          <h2 className="text-lg font-bold underline mb-2">Airfield Status</h2>
+
+          {/* Active Runway */}
+          <div className="mb-2">
+            <p className="font-semibold">Active Runway</p>
+            <button
+              className="px-3 py-1 rounded bg-green-600"
+              onClick={noop}
+            >
+              {airfield.activeRunway}
+            </button>
+          </div>
+
+          {/* RSC */}
+          <div className="mb-2">
+            <p className="font-semibold">RSC</p>
+            <div className="flex gap-2">
+              <button
+                className={`px-3 py-1 rounded ${
+                  airfield.rsc === "DRY"
+                    ? "bg-green-600"
+                    : airfield.rsc === "WET"
+                    ? "bg-red-600"
+                    : "bg-slate-700"
+                }`}
+                onClick={noop}
+              >
+                {airfield.rsc}
+              </button>
+              <input
+                type="text"
+                placeholder="Notes"
+                value={airfield.rscNotes}
+                onChange={noop}
+                className="flex-1 px-2 py-1 rounded bg-slate-900 border border-slate-600 text-sm"
+                readOnly
+              />
+            </div>
+          </div>
+          {/* Barriers */}
+          <div className="mb-2">
+            <p className="font-semibold">Barriers</p>
+            <div className="flex gap-2 flex-wrap">
+              {["east", "west"].map((side) => (
+                <button
+                  key={side}
+                  className={`px-2 py-1 rounded ${
+                    airfield.barriers[side] === "UNSERVICEABLE"
+                      ? "bg-red-600"
+                      : "bg-green-600"
+                  }`}
+                  onClick={noop}
+                >
+                  {side.toUpperCase()} BAK-12 {airfield.barriers[side]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* NAVAIDs */}
+          <div className="mb-2">
+            <p className="font-semibold">NAVAIDs</p>
+            <div className="flex gap-2 flex-wrap">
+              {Object.keys(navaids).map((n) => (
+                <button
+                  key={n}
+                  className={`px-2 py-1 rounded ${
+                    navaids[n] === "IN" ? "bg-green-600" : "bg-red-600"
+                  }`}
+                  onClick={noop}
+                >
+                  {n === "mgm"
+                    ? "MGM TACAN"
+                    : n === "mxf"
+                    ? "MXF TACAN"
+                    : n === "ils10"
+                    ? "ILS 10"
+                    : n === "ils28"
+                    ? "ILS 28"
+                    : n.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ARFF */}
+          <div className="mb-2">
+            <p className="font-semibold">ARFF</p>
+            <button
+              className={`px-3 py-1 rounded ${
+                airfield.arff === "GREEN"
+                  ? "bg-green-600"
+                  : airfield.arff === "YELLOW"
+                  ? "bg-yellow-500"
+                  : "bg-red-600"
+              }`}
+              onClick={noop}
+            >
+              ARFF {airfield.arff}
+            </button>
+          </div>
+        </section>
+
+        {/* Weather */}
+        <section className="relative border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
           <div className="flex items-center gap-2 mb-2">
             <h2 className="text-lg font-bold underline">WEATHER</h2>
             <span
@@ -361,6 +555,7 @@ export default function KioskDashboard() {
               </span>
             )}
           </div>
+
           <div className="grid grid-cols-2 gap-2 text-sm mb-2">
             <div>Winds: {parsed.wind}</div>
             <div>Vis: {parsed.vis}</div>
@@ -385,6 +580,7 @@ export default function KioskDashboard() {
               </span>
             </div>
           </div>
+
           <div className="mt-2 flex-1 overflow-y-auto">
             <p className="text-xs text-slate-400">Raw METAR</p>
             <pre className="bg-slate-900 p-2 rounded text-sm whitespace-pre-wrap break-words">
@@ -416,8 +612,35 @@ export default function KioskDashboard() {
             <p className="text-sm text-slate-400">No NOTAMs available.</p>
           )}
         </section>
+      </div>
 
-        {/* Slides */}
+      {/* Second Row */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch mt-4">
+        {/* BASH Forecast */}
+        <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px] md:col-span-1">
+          <h2 className="text-lg font-bold underline mb-2">BASH Forecast</h2>
+          <div className="flex flex-col gap-2">
+            {Object.keys(bash).map((loc) => (
+              <button
+                key={loc}
+                className={`px-3 py-1 rounded font-bold ${
+                  bash[loc] === "LOW"
+                    ? "bg-green-600"
+                    : bash[loc] === "MODERATE"
+                    ? "bg-yellow-500 text-black"
+                    : bash[loc] === "SEVERE"
+                    ? "bg-red-600"
+                    : "bg-slate-700"
+                }`}
+                onClick={noop}
+              >
+                {loc}: {bash[loc]}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Slides (read-only) */}
         <SlidesCard />
       </div>
     </div>
