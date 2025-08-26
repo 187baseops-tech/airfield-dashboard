@@ -4,7 +4,7 @@ import {
   Stage,
   Layer,
   Rect,
-  Line,
+  Arrow,
   Text as KText,
   Transformer,
   Group,
@@ -16,7 +16,6 @@ import { v4 as uuidv4 } from "uuid";
 // --- Helpers ---
 function highlightTaf(rawTaf) {
   if (!rawTaf) return "--";
-
   return rawTaf
     .replace(/(BKN|OVC)(\d{3})/g, (match, layer, height) => {
       const h = parseInt(height, 10) * 100;
@@ -73,20 +72,15 @@ function flightCat(ceiling, vis) {
   return "VFR";
 }
 
-function computeFits(tempC, dewC) {
+function computeFits(tempC) {
   const tempF = (tempC * 9) / 5 + 32;
-  const dewF = (dewC * 9) / 5 + 32;
-
-  const twbF = dewF + 0.36 * (tempF - dewF);
-  const wbgt = 0.7 * twbF + 0.3 * tempF;
-
   let level = "NORMAL";
-  if (wbgt >= 90 && wbgt <= 101) level = "CAUTION";
-  else if (wbgt >= 102 && wbgt <= 114) level = "DANGER";
-  else if (wbgt >= 115) level = "CANCEL";
-
-  return { level, wbgt: Math.round(wbgt) };
+  if (tempF >= 90 && tempF <= 101) level = "CAUTION";
+  else if (tempF >= 102 && tempF <= 114) level = "DANGER";
+  else if (tempF >= 115) level = "CANCEL";
+  return { level, tempF: Math.round(tempF) };
 }
+
 // --- SlidesCard ---
 function SlidesCard() {
   const [slides, setSlides] = useState([]);
@@ -95,8 +89,8 @@ function SlidesCard() {
   const [tool, setTool] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
-  const [drawing, setDrawing] = useState(null); // temp shape while dragging
-  const [largeView, setLargeView] = useState(false); // toggle for larger slide
+  const [drawing, setDrawing] = useState(null);
+  const [zoom, setZoom] = useState(1); // enlarge toggle
   const trRef = useRef();
 
   const API =
@@ -154,16 +148,26 @@ function SlidesCard() {
     annots[slideKey] = annots[slideKey].filter((a) => a._id !== id);
     saveAnnotations(annots);
     setSelectedId(null);
-    setDrawing(null); // clear preview
+
+    // clear transformer box
+    if (trRef.current) {
+      trRef.current.nodes([]);
+      trRef.current.getLayer().batchDraw();
+    }
   };
 
-  const clearAll = () => {
+  const clearAllAnnotations = () => {
     const file = slides[currentSlide];
     if (!file) return;
     const slideKey = file;
-    saveAnnotations({ ...annotations, [slideKey]: [] });
+    const annots = { ...annotations, [slideKey]: [] };
+    saveAnnotations(annots);
+
+    if (trRef.current) {
+      trRef.current.nodes([]);
+      trRef.current.getLayer().batchDraw();
+    }
     setSelectedId(null);
-    setDrawing(null);
   };
 
   useEffect(() => {
@@ -187,22 +191,24 @@ function SlidesCard() {
 
   const file = slides[currentSlide] || null;
   const slideKey = file || "unknown";
-
-  // Slide size toggle
-  const stageWidth = largeView ? 1200 : 800;
-  const stageHeight = largeView ? 600 : 400;
+  const stageWidth = 800 * zoom;
+  const stageHeight = 400 * zoom;
 
   return (
     <section className="border border-slate-700 rounded-lg p-3 flex flex-col md:col-span-2">
       <h2 className="text-lg font-bold underline mb-2">Airfield Slides</h2>
 
       {file ? (
-        <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden"
-             style={{ height: stageHeight }}>
+        <div className="relative flex-1 bg-slate-900 flex items-center justify-center rounded overflow-hidden">
           <img
             src={`${API}/slides/${file}`}
             alt="Slide"
-            className="object-contain max-h-full max-w-full"
+            style={{
+              transform: `scale(${zoom})`,
+              transformOrigin: "center center",
+              maxHeight: "100%",
+              maxWidth: "100%",
+            }}
           />
           <Stage
             width={stageWidth}
@@ -212,7 +218,6 @@ function SlidesCard() {
               if (!tool || e.target !== e.target.getStage()) return;
               const pos = e.target.getStage().getPointerPosition();
               if (!pos) return;
-
               if (tool === "box") {
                 setDrawing({ type: "box", x: pos.x, y: pos.y, w: 0, h: 0 });
               } else if (tool === "arrow") {
@@ -228,7 +233,6 @@ function SlidesCard() {
               if (!drawing) return;
               const pos = e.target.getStage().getPointerPosition();
               if (!pos) return;
-
               if (drawing.type === "box") {
                 setDrawing({
                   ...drawing,
@@ -287,12 +291,11 @@ function SlidesCard() {
                   );
                 } else if (a.type === "arrow") {
                   shape = (
-                    <Line
+                    <Arrow
                       {...commonProps}
                       points={[a.x1, a.y1, a.x2, a.y2]}
                       stroke="green"
                       strokeWidth={4}
-                      pointerAtEnding={true}
                       pointerLength={12}
                       pointerWidth={12}
                     />
@@ -328,7 +331,7 @@ function SlidesCard() {
                 );
               })}
 
-              {/* Temporary drawing preview */}
+              {/* Temporary preview */}
               {drawing?.type === "box" && (
                 <Rect
                   x={drawing.x}
@@ -340,11 +343,10 @@ function SlidesCard() {
                 />
               )}
               {drawing?.type === "arrow" && (
-                <Line
+                <Arrow
                   points={[drawing.x1, drawing.y1, drawing.x2, drawing.y2]}
                   stroke="green"
                   strokeWidth={4}
-                  pointerAtEnding={true}
                   pointerLength={12}
                   pointerWidth={12}
                   dash={[4, 4]}
@@ -381,17 +383,14 @@ function SlidesCard() {
         >
           {isPlaying ? "⏸ Pause" : "▶ Play"}
         </button>
-        <button
-          onClick={clearAll}
-          className="px-3 py-1 bg-red-600 rounded"
-        >
+        <button onClick={clearAllAnnotations} className="px-3 py-1 bg-red-600 rounded">
           🗑 Clear All
         </button>
         <button
-          onClick={() => setLargeView(!largeView)}
+          onClick={() => setZoom((z) => (z === 1 ? 1.5 : 1))}
           className="px-3 py-1 bg-slate-700 rounded"
         >
-          {largeView ? "🔎 Reduce" : "🔎 Enlarge"}
+          {zoom === 1 ? "🔍 Enlarge" : "🔎 Shrink"}
         </button>
       </div>
 
@@ -399,33 +398,25 @@ function SlidesCard() {
       <div className="flex flex-wrap justify-center gap-2 mt-2">
         <button
           onClick={() => setTool("x")}
-          className={`px-3 py-1 rounded ${
-            tool === "x" ? "bg-blue-600" : "bg-slate-700"
-          }`}
+          className={`px-3 py-1 rounded ${tool === "x" ? "bg-blue-600" : "bg-slate-700"}`}
         >
           ❌ X
         </button>
         <button
           onClick={() => setTool("box")}
-          className={`px-3 py-1 rounded ${
-            tool === "box" ? "bg-blue-600" : "bg-slate-700"
-          }`}
+          className={`px-3 py-1 rounded ${tool === "box" ? "bg-blue-600" : "bg-slate-700"}`}
         >
           ⬛ Box
         </button>
         <button
           onClick={() => setTool("arrow")}
-          className={`px-3 py-1 rounded ${
-            tool === "arrow" ? "bg-blue-600" : "bg-slate-700"
-          }`}
+          className={`px-3 py-1 rounded ${tool === "arrow" ? "bg-blue-600" : "bg-slate-700"}`}
         >
           ➡️ Arrow
         </button>
         <button
           onClick={() => setTool("text")}
-          className={`px-3 py-1 rounded ${
-            tool === "text" ? "bg-blue-600" : "bg-slate-700"
-          }`}
+          className={`px-3 py-1 rounded ${tool === "text" ? "bg-blue-600" : "bg-slate-700"}`}
         >
           📝 Text
         </button>
@@ -442,7 +433,7 @@ export default function Dashboard() {
   const [taf, setTaf] = useState("");
   const [parsed, setParsed] = useState({});
   const [cat, setCat] = useState("VFR");
-  const [fits, setFits] = useState({ level: "NORMAL", wbgt: NaN });
+  const [fits, setFits] = useState({ level: "NORMAL", tempF: NaN });
   const [altReq, setAltReq] = useState(false);
   const [altICAO, setAltICAO] = useState("");
   const [notams, setNotams] = useState([]);
@@ -465,7 +456,8 @@ export default function Dashboard() {
     ShelbyRange: "LOW",
   });
 
-  const API = process.env.REACT_APP_API_URL || "https://one87oss-airfield-dashboard.onrender.com";
+  const API =
+    process.env.REACT_APP_API_URL || "https://one87oss-airfield-dashboard.onrender.com";
 
   // --- Fetch METAR/TAF/NOTAMs ---
   async function fetchData() {
@@ -509,7 +501,7 @@ export default function Dashboard() {
       fetchData();
       fetchNavaids();
       fetchBash();
-    }, 300000); // every 5 min
+    }, 300000);
     return () => clearInterval(timer);
   }, []);
 
@@ -517,27 +509,19 @@ export default function Dashboard() {
   useEffect(() => {
     const p = parseMetar(metar);
     setParsed(p);
-
     const visMiles = parseVisibility(p.vis);
     const ceilFt =
       p.ceiling && /^(BKN|OVC)\d{3}/.test(p.ceiling)
         ? parseInt(p.ceiling.match(/\d{3}/)[0]) * 100
         : 99999;
     setCat(flightCat(ceilFt, visMiles));
-
-   const tempMatch = p.tempdew?.match(/(M?\d{2})\/(M?\d{2})/);
-   if (tempMatch) {
-   const tC = parseInt(tempMatch[1].replace("M", "-")); // dry bulb °C
-   setFits(computeFits(tC));
-}
-
+    const tempMatch = p.tempdew?.match(/(M?\d{2})\/(M?\d{2})/);
+    if (tempMatch) {
+      const tC = parseInt(tempMatch[1].replace("M", "-"));
+      setFits(computeFits(tC));
+    }
     let altNeeded = false;
-    if (
-      p.ceiling &&
-      /^(BKN|OVC)\d{3}/.test(p.ceiling) &&
-      ceilFt <= 1500 &&
-      visMiles < 3
-    ) {
+    if (p.ceiling && /^(BKN|OVC)\d{3}/.test(p.ceiling) && ceilFt <= 1500 && visMiles < 3) {
       altNeeded = true;
     }
     setAltReq(altNeeded);
@@ -554,9 +538,7 @@ export default function Dashboard() {
         <div className="text-sm mt-2">
           <p>{new Date().toLocaleString()}</p>
           <p>Zulu: {new Date().toUTCString()}</p>
-          <p className="text-slate-400">
-            Last Updated: {lastUpdate.toLocaleString()}
-          </p>
+          <p className="text-slate-400">Last Updated: {lastUpdate.toLocaleString()}</p>
           <button
             onClick={() => {
               fetchData();
@@ -575,20 +557,16 @@ export default function Dashboard() {
         {/* Airfield Status */}
         <section className="border border-slate-700 rounded-lg p-3 flex flex-col h-[500px]">
           <h2 className="text-lg font-bold underline mb-2">Airfield Status</h2>
-
           {/* Active Runway */}
           <div className="mb-2">
             <p className="font-semibold">Active Runway</p>
             <button
               className="px-3 py-1 rounded bg-green-600"
-              onClick={() =>
-                setActiveRunway(activeRunway === "10" ? "28" : "10")
-              }
+              onClick={() => setActiveRunway(activeRunway === "10" ? "28" : "10")}
             >
               {activeRunway}
             </button>
           </div>
-
           {/* RSC */}
           <div className="mb-2">
             <p className="font-semibold">RSC</p>
@@ -602,13 +580,7 @@ export default function Dashboard() {
                     : "bg-slate-700"
                 }`}
                 onClick={() =>
-                  setRsc(
-                    rsc === "DRY"
-                      ? "WET"
-                      : rsc === "WET"
-                      ? "N/A"
-                      : "DRY"
-                  )
+                  setRsc(rsc === "DRY" ? "WET" : rsc === "WET" ? "N/A" : "DRY")
                 }
               >
                 {rsc}
@@ -622,7 +594,6 @@ export default function Dashboard() {
               />
             </div>
           </div>
-
           {/* Barriers */}
           <div className="mb-2">
             <p className="font-semibold">Barriers</p>
@@ -631,9 +602,7 @@ export default function Dashboard() {
                 <button
                   key={side}
                   className={`px-2 py-1 rounded ${
-                    barriers[side] === "UNSERVICEABLE"
-                      ? "bg-red-600"
-                      : "bg-green-600"
+                    barriers[side] === "UNSERVICEABLE" ? "bg-red-600" : "bg-green-600"
                   }`}
                   onClick={() =>
                     setBarriers((prev) => ({
@@ -644,49 +613,46 @@ export default function Dashboard() {
                           : prev[side] === "UP"
                           ? "UNSERVICEABLE"
                           : "DOWN",
-                    }))}
+                    }))
+                  }
                 >
                   {side.toUpperCase()} BAK-12 {barriers[side]}
                 </button>
               ))}
             </div>
           </div>
-
-         {/* NAVAIDs */}
-<div className="mb-2">
-  <p className="font-semibold">NAVAIDs</p>
-  <div className="flex gap-2 flex-wrap">
-    {Object.keys(navaids).map((n) => (
-      <button
-        key={n}
-        onClick={async () => {
-          try {
-            console.log("🔄 Toggling NAVAID:", n);
-            const res = await axios.post(`${API}/api/navaids`, { name: n });
-            console.log("✅ NAVAID updated:", res.data);
-            setNavaids(res.data.navaids);
-          } catch (err) {
-            console.error("❌ Failed to toggle NAVAID:", err.response?.data || err.message);
-          }
-        }}
-        className={`px-2 py-1 rounded ${
-          navaids[n] === "IN" ? "bg-green-600" : "bg-red-600"
-        }`}
-      >
-        {n === "mgm"
-          ? "MGM TACAN"
-          : n === "mxf"
-          ? "MXF TACAN"
-          : n === "ils10"
-          ? "ILS 10"
-          : n === "ils28"
-          ? "ILS 28"
-          : n.toUpperCase()}
-      </button>
-    ))}
-  </div>
-</div>
-
+          {/* NAVAIDs */}
+          <div className="mb-2">
+            <p className="font-semibold">NAVAIDs</p>
+            <div className="flex gap-2 flex-wrap">
+              {Object.keys(navaids).map((n) => (
+                <button
+                  key={n}
+                  onClick={async () => {
+                    try {
+                      const res = await axios.post(`${API}/api/navaids`, { name: n });
+                      setNavaids(res.data.navaids);
+                    } catch (err) {
+                      console.error("Failed to toggle NAVAID:", err.message);
+                    }
+                  }}
+                  className={`px-2 py-1 rounded ${
+                    navaids[n] === "IN" ? "bg-green-600" : "bg-red-600"
+                  }`}
+                >
+                  {n === "mgm"
+                    ? "MGM TACAN"
+                    : n === "mxf"
+                    ? "MXF TACAN"
+                    : n === "ils10"
+                    ? "ILS 10"
+                    : n === "ils28"
+                    ? "ILS 28"
+                    : n.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
           {/* ARFF */}
           <div className="mb-2">
             <p className="font-semibold">ARFF</p>
@@ -699,13 +665,7 @@ export default function Dashboard() {
                   : "bg-red-600"
               }`}
               onClick={() =>
-                setArff(
-                  arff === "GREEN"
-                    ? "YELLOW"
-                    : arff === "YELLOW"
-                    ? "RED"
-                    : "GREEN"
-                )
+                setArff(arff === "GREEN" ? "YELLOW" : arff === "YELLOW" ? "RED" : "GREEN")
               }
             >
               ARFF {arff}
@@ -736,7 +696,6 @@ export default function Dashboard() {
               </span>
             )}
           </div>
-
           {altReq && (
             <input
               type="text"
@@ -746,7 +705,6 @@ export default function Dashboard() {
               className="w-full px-2 py-1 rounded bg-slate-900 border border-slate-600 text-sm font-bold text-red-500 mb-2"
             />
           )}
-
           <div className="grid grid-cols-2 gap-2 text-sm mb-2">
             <div>Winds: {parsed.wind}</div>
             <div>Vis: {parsed.vis}</div>
@@ -771,7 +729,6 @@ export default function Dashboard() {
               </span>
             </div>
           </div>
-
           <div className="mt-2 flex-1 overflow-y-auto">
             <p className="text-xs text-slate-400">Raw METAR</p>
             <pre className="bg-slate-900 p-2 rounded text-sm whitespace-pre-wrap break-words">
@@ -791,7 +748,10 @@ export default function Dashboard() {
           {notams.length > 0 ? (
             <ul className="space-y-2 text-sm flex-1 overflow-y-auto">
               {notams.map((n) => (
-                <li key={n.id} className="p-2 rounded border border-slate-700 bg-slate-900">
+                <li
+                  key={n.id}
+                  className="p-2 rounded border border-slate-700 bg-slate-900"
+                >
                   <pre className="font-mono whitespace-pre-wrap">{n.text}</pre>
                 </li>
               ))}
