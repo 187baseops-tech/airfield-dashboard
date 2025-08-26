@@ -543,90 +543,84 @@ export default function Dashboard() {
     187th Operations Support Squadron — {ICAO} Dannelly Field
   </h1>
   <p className="text-lg font-semibold">Airfield Dashboard</p>
-  ...
-</header>
 
-  <h1 className="text-xl font-bold">
-    187th Operations Support Squadron — {ICAO} Dannelly Field
-  </h1>
-  <p className="text-lg font-semibold">Airfield Dashboard</p>
   <div className="text-sm mt-2">
-  {/* Local time in ICAO format */}
-  <p>
-    Local:{" "}
-    {new Date()
-      .toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-      .toUpperCase()
-      .replace(",", "")}{" "}
-    {new Date()
-      .toLocaleTimeString([], {
-        hour12: false,
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-      .replace(":", "")}
-    L
-  </p>
+    {/* Local time in ICAO format */}
+    <p>
+      Local:{" "}
+      {new Date()
+        .toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+        .toUpperCase()
+        .replace(",", "")}{" "}
+      {new Date()
+        .toLocaleTimeString([], {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+        .replace(":", "")}
+      L
+    </p>
 
-  {/* Zulu time in ICAO format */}
-  <p>
-    Zulu:{" "}
-    {new Date()
-      .toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-        timeZone: "UTC",
-      })
-      .toUpperCase()
-      .replace(",", "")}{" "}
-    {new Date()
-      .toLocaleTimeString("en-GB", {
-        hour12: false,
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "UTC",
-      })
-      .replace(":", "")}
-    Z
-  </p>
+    {/* Zulu time in ICAO format */}
+    <p>
+      Zulu:{" "}
+      {new Date()
+        .toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          timeZone: "UTC",
+        })
+        .toUpperCase()
+        .replace(",", "")}{" "}
+      {new Date()
+        .toLocaleTimeString("en-GB", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          timeZone: "UTC",
+        })
+        .replace(":", "")}
+      Z
+    </p>
 
-  {/* Last updated in local time, ICAO style */}
-  <p className="text-slate-400">
-    Last Updated:{" "}
-    {lastUpdate
-      .toLocaleDateString("en-GB", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      })
-      .toUpperCase()
-      .replace(",", "")}{" "}
-    {lastUpdate
-      .toLocaleTimeString([], {
-        hour12: false,
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-      .replace(":", "")}
-    L
-  </p>
+    {/* Last updated */}
+    <p className="text-slate-400">
+      Last Updated:{" "}
+      {lastUpdate
+        .toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+        .toUpperCase()
+        .replace(",", "")}{" "}
+      {lastUpdate
+        .toLocaleTimeString([], {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+        .replace(":", "")}
+      L
+    </p>
 
-  <button
-    onClick={() => {
-      fetchMetarTaf();
-      fetchNotams();
-      fetchState();
-    }}
-    className="mt-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded"
-  >
-    🔄 Refresh
-  </button>
-</div>
+    <button
+      onClick={() => {
+        fetchMetarTaf();
+        fetchNotams();
+        fetchState();
+      }}
+      className="mt-1 px-3 py-1 bg-blue-600 hover:bg-blue-500 rounded"
+    >
+      🔄 Refresh
+    </button>
+  </div>
 </header>
 
       {/* First Row */}
@@ -867,7 +861,7 @@ export default function Dashboard() {
                   className="p-2 rounded border border-slate-700 bg-slate-900"
                 >
                   <pre className="font-mono whitespace-pre-wrap">{n.text}</pre>
-                </li>
+                </li> 
               ))}
             </ul>
           ) : (
