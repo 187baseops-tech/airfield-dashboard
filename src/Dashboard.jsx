@@ -810,32 +810,34 @@ export default function Dashboard() {
   </div>
 
   {/* Crosswind diagram (mini, top-right) */}
-  <CrosswindVisual wind={parsed.wind} runway={airfield.activeRunway} />
+<CrosswindVisual wind={parsed.wind} runway={airfield.activeRunway} />
 
-  <div className="grid grid-cols-2 gap-2 text-sm mb-2 mt-2">
-    <div>Winds: {parsed.wind}</div>
-    <div>Vis: {parsed.vis}</div>
-    <div>Ceiling: {parsed.ceiling}</div>
-    <div>Altimeter: {parsed.altimeter}</div>
-    <div>Temp/Dew: {parsed.tempdew}</div>
-    <div>
-      FITS:{" "}
-      <span
-        className={`ml-1 font-bold ${
-          fits.level === "NORMAL"
-            ? "text-green-400"
-            : fits.level === "CAUTION"
-            ? "text-yellow-400"
-            : fits.level === "DANGER"
-            ? "text-orange-500"
-            : "text-red-600"
-        }`}
-      >
-        {fits.level}{" "}
-        {Number.isFinite(fits.tempF) && `(${fits.tempF} °F Dry Bulb)`}
-      </span>
-    </div>
+{/* Shift text down so it clears the icon */}
+<div className="grid grid-cols-2 gap-2 text-sm mb-2 mt-16">
+  <div>Winds: {parsed.wind}</div>
+  <div>Vis: {parsed.vis}</div>
+  <div>Ceiling: {parsed.ceiling}</div>
+  <div>Altimeter: {parsed.altimeter}</div>
+  <div>Temp/Dew: {parsed.tempdew}</div>
+  <div>
+    FITS:{" "}
+    <span
+      className={`ml-1 font-bold ${
+        fits.level === "NORMAL"
+          ? "text-green-400"
+          : fits.level === "CAUTION"
+          ? "text-yellow-400"
+          : fits.level === "DANGER"
+          ? "text-orange-500"
+          : "text-red-600"
+      }`}
+    >
+      {fits.level}{" "}
+      {Number.isFinite(fits.tempF) && `(${fits.tempF} °F Dry Bulb)`}
+    </span>
   </div>
+</div>
+
 
   <div className="mt-2 flex-1 overflow-y-auto">
     <p className="text-xs text-slate-400">Raw METAR</p>
